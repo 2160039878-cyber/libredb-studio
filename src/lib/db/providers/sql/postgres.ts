@@ -60,7 +60,7 @@ interface PgStatActivityRow {
 interface SchemaRow {
   table_schema: string;
   table_name: string;
-  row_count: string;
+  row_count: string | null;
   total_size: string;
   pk_columns: string[];
   columns?: Array<{ name: string; type: string; nullable: boolean; defaultValue?: string | null }>;
@@ -93,19 +93,126 @@ type SchemaRelationRow = Pick<SchemaRow, "table_schema" | "table_name" | "foreig
 // each CTE to compute once — ~295s -> ~2.6s on a 122-table schema.
 // ============================================================================
 
+// Schemas that hold engine internals rather than a user's own tables, single-sourced
+// so a new query cannot filter on a shorter list than the rest of the file. Every
+// entry was read off that engine's own documentation and then confirmed against a
+// live instance; stock PostgreSQL creates none of them, so excluding them there is a
+// no-op. Two separate defects made this list load-bearing rather than cosmetic:
+// the object browser reads information_schema and listed 61 tables on TimescaleDB
+// where 2 were the user's (34 chunk tables, 22 catalog, 3 cache), 10 on AlloyDB Omni
+// and 4 on Cloudberry; and the overview counts pg_tables directly, which on
+// CockroachDB answers 98 for the same 2 tables because crdb_internal objects reach
+// pg_tables but not information_schema's BASE TABLE filter - so the two panels
+// disagreed inside one app. Sorted by engine, not alphabetically, so each group can
+// be checked against its citation.
+const SYSTEM_SCHEMAS = [
+  // PostgreSQL itself.
+  "pg_catalog",
+  "information_schema",
+  "pg_toast",
+  // Materialize - materialize.com/docs/sql/system-catalog/
+  "mz_catalog",
+  "mz_internal",
+  "mz_introspection",
+  // CockroachDB - cockroachlabs.com/docs/stable/system-catalogs enumerates exactly
+  // four schemas; the two below are the ones stock PostgreSQL does not also have.
+  "crdb_internal",
+  "pg_extension",
+  // TimescaleDB - the extension's own sql/pre_install/schemas.sql creates all seven.
+  // `_timescaledb_internal` is the one that floods: it holds every hypertable chunk.
+  "_timescaledb_catalog",
+  "_timescaledb_config",
+  "_timescaledb_functions",
+  "_timescaledb_internal",
+  "_timescaledb_cache",
+  "timescaledb_experimental",
+  "timescaledb_information",
+  // Apache Cloudberry - cloudberry.apache.org create-and-manage-schemas documents the
+  // first three. `pg_ext_aux` is not in that page but holds the PAX auxiliary tables
+  // (pg_pax_tables, pg_pax_fastsequence) on a live 2.1.0 instance, so it is here on
+  // measurement rather than on the doc's authority.
+  "gp_toolkit",
+  "pg_aoseg",
+  "pg_bitmapindex",
+  "pg_ext_aux",
+] as const;
+
+/**
+ * What `pg_class.reltuples` actually said, or nothing.
+ *
+ * It is an estimate, and PostgreSQL 14+ writes **-1** for a relation nothing has
+ * vacuumed or analysed yet: "I have not counted this", which is not "this has no rows".
+ * NULL arrives the same way when the pg_class join matched nothing at all. Both become
+ * absence, and `TableSchema.rowCount` is optional so the badge simply is not drawn -
+ * the object browser already gates on that.
+ *
+ * Measured on stock PostgreSQL 18.4: two tables holding 5000 and 1200 rows both read -1
+ * until ANALYZE ran, and every one of them displayed "0 rows". A freshly restored dump
+ * is exactly that state. `src/lib/agent/schema-stats.ts` already reads -1 as absence for
+ * the agent's grounding read and names the reason - "the standing defect class in this
+ * repository is claiming a precision you do not have" - and this is the same read for a
+ * person instead of a model.
+ *
+ * A genuine 0 is kept, because an empty table is a real measurement. On a server old
+ * enough to write 0 rather than -1 the two are indistinguishable and nothing here can
+ * tell them apart, the same limit schema-stats.ts documents.
+ */
+function estimatedRowCount(raw: string | null | undefined): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const parsed = parseInt(raw);
+  return Number.isNaN(parsed) || parsed < 0 ? undefined : parsed;
+}
+
+// Rendered once. Callers interpolate this into a `NOT IN (...)` clause.
+const SYSTEM_SCHEMA_LIST = SYSTEM_SCHEMAS.map((schema) => `'${schema}'`).join(", ");
+
+// AlloyDB Omni is deliberately absent from the list above. Its google_ml schema is
+// created by an extension rather than built into the engine, and "google_ml" is the
+// one name of this kind a user could plausibly choose for a schema of their own -
+// hiding it by name would make their tables vanish with no explanation. Ownership is
+// the question the name was standing in for, and pg_depend answers it directly and
+// better: on a live AlloyDB Omni it returns google_ml AND ai, which a name list had
+// missed. Measured on all seven engines including PostgreSQL, where it correctly
+// returns nothing; a user's own schema is never extension-owned, so it always
+// survives. Kept free of parentheses so the fallback below can strip it by regex.
+const EXTENSION_OWNED_SCHEMAS_SQL =
+  "SELECT n.nspname FROM pg_namespace n " +
+  "JOIN pg_depend d ON d.objid = n.oid AND d.classid = 'pg_namespace'::regclass AND d.deptype = 'e' " +
+  "JOIN pg_extension e ON e.oid = d.refobjid";
+
+// What counts as a table, single-sourced because two readers ask: the object browser
+// and the overview's count. They answered from different catalogs and disagreed twice
+// - 98 against 2 on CockroachDB, then 4 against 3 on Materialize once materialized
+// views joined the browser - so both now read information_schema.tables through this.
+const USER_TABLE_TYPES = "'BASE TABLE', 'MATERIALIZED VIEW'";
+
+// The full "this schema is not the engine's own" test for one column: a fixed list of
+// engine-builtin schemas, plus anything an extension created.
+function schemaExclusion(column: string): string {
+  return `${column} NOT IN (${SYSTEM_SCHEMA_LIST}) AND ${column} NOT IN (${EXTENSION_OWNED_SCHEMAS_SQL})`;
+}
+
 // Reusable CTE fragments (no trailing comma). Composed into the queries below;
 // kept single-sourced so the shared CTEs aren't duplicated across queries.
+// The table_type filter is a positive list, not "anything that is not a view".
+// `MATERIALIZED VIEW` is on it for Materialize, which reports its materialized views
+// through information_schema.tables under that type and whose users work with them
+// rather than with base tables - listing only BASE TABLE hid the product itself.
+// Measured no-op everywhere else: PostgreSQL leaves materialized views out of
+// information_schema.tables altogether (its table_type is only BASE TABLE, VIEW,
+// FOREIGN or LOCAL TEMPORARY), and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni
+// and CockroachDB were each checked on a live instance and emit no such row.
 const CTE_TABLES_INFO = `
         tables_info AS MATERIALIZED (
           SELECT
             t.table_schema,
             t.table_name,
-            COALESCE(c.reltuples::bigint, 0) as row_count,
+            c.reltuples::bigint as row_count,
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
-          LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
-          WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
-          AND t.table_type = 'BASE TABLE'
+          LEFT JOIN pg_class c ON c.oid = to_regclass(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))
+          WHERE ${schemaExclusion("t.table_schema")}
+          AND t.table_type IN (${USER_TABLE_TYPES})
         )`;
 
 const CTE_COLUMNS_INFO = `
@@ -122,7 +229,7 @@ const CTE_COLUMNS_INFO = `
               ) ORDER BY c.ordinal_position
             ) FILTER (WHERE c.ordinal_position <= 100) as columns
           FROM information_schema.columns c
-          WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          WHERE ${schemaExclusion("c.table_schema")}
           GROUP BY c.table_schema, c.table_name
         )`;
 
@@ -137,6 +244,7 @@ const CTE_PK_INFO = `
             ON tc.constraint_name = kcu.constraint_name
             AND tc.table_schema = kcu.table_schema
           WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND ${schemaExclusion("tc.table_schema")}
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -161,6 +269,7 @@ const CTE_FK_INFO = `
             ON ccu.constraint_name = tc.constraint_name
             AND ccu.constraint_schema = tc.constraint_schema
           WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND ${schemaExclusion("tc.table_schema")}
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -184,7 +293,7 @@ const CTE_INDEX_INFO = `
           JOIN pg_class t ON t.oid = ix.indrelid
           JOIN pg_class i ON i.oid = ix.indexrelid
           JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          WHERE ${schemaExclusion("n.nspname")}
           GROUP BY n.nspname, t.relname
         )`;
 
@@ -236,6 +345,146 @@ const SCHEMA_RELATIONS_SQL = `
         FULL OUTER JOIN index_info ii
           ON ii.table_schema = fk.table_schema AND ii.table_name = fk.table_name;
       `;
+
+// Materialize and RisingWave reserve MATERIALIZED as a keyword (it's part of
+// their own CREATE MATERIALIZED VIEW grammar), so they reject the CTE modifier
+// above with a syntax error - even though the information_schema/pg_catalog
+// views these CTEs query are otherwise readable there. Stripping the hint lets
+// the schema query run as plain CTEs on those engines instead of failing outright.
+function withoutMaterializedHint(sql: string): string {
+  return sql.replace(/\bAS MATERIALIZED\s*\(/gi, "AS (");
+}
+
+// Message text for this collision is not standardized across engines - PostgreSQL-style
+// "syntax error at or near ..." never applies here since real PostgreSQL accepts the hint,
+// so only an engine that rejects it reaches this check. Materialize says "Expected left
+// parenthesis, found MATERIALIZED" - no "syntax error" substring at all. This SQL text is
+// always exactly one of the SCHEMA_*_SQL consts above, so any error naming MATERIALIZED is
+// necessarily about this reserved-keyword collision, not an unrelated coincidence.
+function isMaterializedKeywordSyntaxError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("materialized");
+}
+
+// CockroachDB has no pg_total_relation_size() builtin (its own compatibility.ts entry
+// says so); Materialize reaches the same gap once the MATERIALIZED retry above gets past
+// the keyword collision. Replacing the call with a literal 0 loses per-table size for
+// those engines but recovers every other column instead of failing the query outright.
+function withoutTotalRelationSizeFn(sql: string): string {
+  return sql.replace(/pg_total_relation_size\(c\.oid\)/gi, "0");
+}
+
+function isMissingTotalRelationSizeError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("pg_total_relation_size");
+}
+
+// Materialize has no json_agg()/json_build_object() - only their jsonb_ equivalents,
+// which return the same array/object shape over the wire (node-postgres parses both
+// the json and jsonb OIDs into plain JS values), so swapping the function name is
+// enough; the '[]'::json casts elsewhere in these queries are unaffected, since the
+// json TYPE itself does exist there.
+function withoutJsonAggFunctions(sql: string): string {
+  return sql.replace(/\bjson_agg\(/gi, "jsonb_agg(").replace(/\bjson_build_object\(/gi, "jsonb_build_object(");
+}
+
+function isMissingJsonAggError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("json_agg") || message.includes("json_build_object");
+}
+
+// Replaces one named CTE's body, matching the closing parenthesis by depth rather
+// than by text, because the fallbacks above have already rewritten parts of this
+// SQL by the time this one runs and a literal match would no longer find it. Brackets
+// inside single-quoted strings are skipped, so a literal cannot move the boundary; it
+// is still not a general SQL parser (no dollar-quoting, no comments). Returns the SQL
+// untouched when the CTE is absent,
+// which is how a query that never joined the FK catalog reports "not repairable"
+// instead of silently retrying something it did not change.
+function replaceCteBody(sql: string, cteName: string, body: string): string {
+  const header = new RegExp(`${cteName}\\s+AS\\s+(?:MATERIALIZED\\s+)?\\(`, "i");
+  const match = header.exec(sql);
+  if (!match) return sql;
+
+  const bodyStart = match.index + match[0].length;
+  let depth = 1;
+  let cursor = bodyStart;
+  let inLiteral = false;
+  while (cursor < sql.length && depth > 0) {
+    const char = sql[cursor];
+    // A bracket inside a quoted string is text, not structure. SQL escapes a quote by
+    // doubling it, and flipping twice lands back on the same state, so '' needs no
+    // special case. These CTEs use no dollar-quoting.
+    if (char === "'") inLiteral = !inLiteral;
+    else if (!inLiteral) {
+      if (char === "(") depth++;
+      else if (char === ")") depth--;
+    }
+    cursor++;
+  }
+  return sql.slice(0, bodyStart) + body + sql.slice(cursor - 1);
+}
+
+// Materialize answers information_schema.table_constraints and key_column_usage but
+// has no constraint_column_usage, which is the only one of the three that names the
+// table a foreign key points AT - so the relationship is genuinely unknowable there,
+// while every other column in the same query is not. Emptying the CTE keeps the outer
+// LEFT JOIN and FULL OUTER JOIN valid and leaves foreignKeys as [], an absence, rather
+// than dropping the tables and columns that were readable all along.
+const EMPTY_FK_INFO_BODY = `
+          SELECT
+            NULL::text AS table_schema,
+            NULL::text AS table_name,
+            NULL::json AS foreign_keys
+          WHERE false
+        `;
+
+function withoutForeignKeyCatalog(sql: string): string {
+  return replaceCteBody(sql, "fk_info", EMPTY_FK_INFO_BODY);
+}
+
+function isMissingConstraintColumnUsageError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("constraint_column_usage");
+}
+
+// Every engine probed accepts the ownership test, PostgreSQL 18.4, TimescaleDB,
+// YugabyteDB, Cloudberry, AlloyDB Omni, CockroachDB and Materialize among them, but
+// the driver serves engines nobody here has run. One that has no pg_depend or
+// pg_extension drops the clause and keeps the fixed list, which is what it filtered
+// on before ownership was asked at all.
+function withoutExtensionOwnershipTest(sql: string): string {
+  return sql.replace(/\s+AND\s+[\w.]+ NOT IN \(SELECT n\.nspname FROM pg_namespace n JOIN pg_depend[^)]*\)/g, "");
+}
+
+// tables_info lists relations from information_schema and then resolves each name to a
+// pg_class row. A bare ::regclass cast RAISES when the name no longer resolves, so a
+// table dropped between those two steps killed the whole read - reproduced on
+// PostgreSQL 18.4, where 102 of 400 runs died under concurrent CREATE/DROP.
+// to_regclass() answers NULL instead, and the row survives with its count absent.
+//
+// Measured: PostgreSQL, TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni and
+// CockroachDB all have to_regclass. Materialize does not, and it is the engine this
+// chain exists for, so it retries with the cast it had before - back to raising on a
+// concurrent drop, which is what it did all along.
+function withoutToRegclass(sql: string): string {
+  return sql.replace(
+    /to_regclass\((quote_ident\(t\.table_schema\) \|\| '\.' \|\| quote_ident\(t\.table_name\))\)/g,
+    "($1)::regclass",
+  );
+}
+
+function isMissingToRegclassError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("to_regclass");
+}
+
+function isMissingExtensionCatalogError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return message.includes("pg_depend") || message.includes("pg_extension");
+}
 
 // ============================================================================
 // Monitoring & maintenance SQL
@@ -299,10 +548,15 @@ const HEALTH_SESSIONS_SQL = `
         LIMIT 10;
       `;
 
-// getOverview: server version, start time, and uptime.
-const OVERVIEW_INFO_SQL = `
+// getOverview: server version. Split from uptime/start time below because a single
+// SELECT fails whole-row if any one column's function is unavailable, and
+// pg_postmaster_start_time() does not exist on engines with no pg statistics
+// catalog (Materialize, RisingWave) even though version() does.
+const OVERVIEW_VERSION_SQL = `SELECT version() as version`;
+
+// getOverview: start time and uptime, guarded separately (see above).
+const OVERVIEW_UPTIME_SQL = `
         SELECT
-          version() as version,
           pg_postmaster_start_time() as start_time,
           EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time()))::bigint as uptime_seconds
       `;
@@ -326,8 +580,9 @@ const OVERVIEW_SIZE_SQL = `
 // getOverview: user table and index counts across all user schemas.
 const OVERVIEW_COUNTS_SQL = `
         SELECT
-          (SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')) as table_count,
-          (SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')) as index_count
+          (SELECT count(*) FROM information_schema.tables
+            WHERE ${schemaExclusion("table_schema")} AND table_type IN (${USER_TABLE_TYPES})) as table_count,
+          (SELECT count(*) FROM pg_indexes WHERE ${schemaExclusion("schemaname")}) as index_count
       `;
 
 // getPerformanceMetrics: buffer cache hit ratio. NULL when there is nothing to
@@ -1082,6 +1337,46 @@ export class PostgresProvider extends SQLBaseProvider {
   // Schema Operations
   // ============================================================================
 
+  /**
+   * Runs a schema-introspection query built from `AS MATERIALIZED` CTEs,
+   * `pg_total_relation_size()` and `json_agg()`/`json_build_object()`. Real
+   * PostgreSQL accepts all of these and this succeeds on the first try. Three
+   * independent things can reject it on a wire-compatible relative, and each
+   * engine can hit them in a different order or subset: Materialize/RisingWave
+   * reserve MATERIALIZED as a keyword (their own CREATE MATERIALIZED VIEW
+   * grammar) and reject the CTE modifier outright; CockroachDB and Materialize
+   * both lack `pg_total_relation_size()`; Materialize also has no `json_agg()`/
+   * `json_build_object()`, only the `jsonb_` equivalents. Every fallback is
+   * matched against whichever error actually comes back, not tried in a fixed
+   * order, so one engine hitting only the second or third gap still recovers.
+   * Recovers real object-browser data on those engines instead of failing outright;
+   * any error no fallback recognizes, or one that survives every applicable
+   * fallback, is mapped and rethrown rather than left raw.
+   */
+  private async queryWithMaterializedFallback(client: PoolClient, sql: string) {
+    const remainingFallbacks = [
+      { matches: isMaterializedKeywordSyntaxError, apply: withoutMaterializedHint },
+      { matches: isMissingTotalRelationSizeError, apply: withoutTotalRelationSizeFn },
+      { matches: isMissingJsonAggError, apply: withoutJsonAggFunctions },
+      { matches: isMissingConstraintColumnUsageError, apply: withoutForeignKeyCatalog },
+      { matches: isMissingExtensionCatalogError, apply: withoutExtensionOwnershipTest },
+      { matches: isMissingToRegclassError, apply: withoutToRegclass },
+    ];
+    let currentSql = sql;
+    for (;;) {
+      try {
+        return await client.query(currentSql);
+      } catch (error) {
+        const index = remainingFallbacks.findIndex((fallback) => fallback.matches(error));
+        // currentSql, not sql: the chain rewrites the statement as it goes, and quoting
+        // the original would point a reader at text the server never received.
+        if (index === -1) throw mapDatabaseError(error, "postgres", currentSql);
+        currentSql = remainingFallbacks[index].apply(currentSql);
+        remainingFallbacks.splice(index, 1);
+      }
+    }
+  }
+
   public async getSchema(): Promise<TableSchema[]> {
     this.ensureConnected();
 
@@ -1089,13 +1384,13 @@ export class PostgresProvider extends SQLBaseProvider {
     try {
       // Single MATERIALIZED query (see SCHEMA_FULL_SQL) replacing the old
       // N+1 pattern (1 + N*4 queries) with one round-trip.
-      const result = await client.query(SCHEMA_FULL_SQL);
+      const result = await this.queryWithMaterializedFallback(client, SCHEMA_FULL_SQL);
 
       return result.rows.map((row: SchemaRow) => {
         const schemaName = row.table_schema;
         const tableName = row.table_name;
         const displayName = schemaName === "public" ? tableName : `${schemaName}.${tableName}`;
-        const rowCount = Math.max(0, parseInt(row.row_count || "0"));
+        const rowCount = estimatedRowCount(row.row_count);
         const sizeBytes = parseInt(row.total_size || "0");
         const pkColumns: string[] = row.pk_columns || [];
 
@@ -1149,7 +1444,7 @@ export class PostgresProvider extends SQLBaseProvider {
     this.ensureConnected();
     const client = await this.pool!.connect();
     try {
-      const result = await client.query(SCHEMA_LIST_SQL);
+      const result = await this.queryWithMaterializedFallback(client, SCHEMA_LIST_SQL);
 
       return result.rows.map((row: SchemaListRow) => {
         const displayName = row.table_schema === "public" ? row.table_name : `${row.table_schema}.${row.table_name}`;
@@ -1163,7 +1458,7 @@ export class PostgresProvider extends SQLBaseProvider {
         }));
         return {
           name: displayName,
-          rowCount: Math.max(0, parseInt(row.row_count || "0")),
+          rowCount: estimatedRowCount(row.row_count),
           size: formatBytes(parseInt(row.total_size || "0")),
           columns,
           indexes: [],
@@ -1185,7 +1480,7 @@ export class PostgresProvider extends SQLBaseProvider {
     this.ensureConnected();
     const client = await this.pool!.connect();
     try {
-      const result = await client.query(SCHEMA_RELATIONS_SQL);
+      const result = await this.queryWithMaterializedFallback(client, SCHEMA_RELATIONS_SQL);
 
       return result.rows.map((row: SchemaRelationRow) => {
         const displayName = row.table_schema === "public" ? row.table_name : `${row.table_schema}.${row.table_name}`;
@@ -1218,14 +1513,40 @@ export class PostgresProvider extends SQLBaseProvider {
 
     const client = await this.pool!.connect();
     try {
-      const connRes = await client.query("SELECT count(*) FROM pg_stat_activity");
+      // Engines that answer the SQL editor but have no pg statistics catalog at
+      // all (Materialize, RisingWave) reject every query below. Each is isolated
+      // in its own try/catch, matching the pg_stat_statements fallback further
+      // down, so a missing catalog degrades that one panel instead of failing
+      // the whole health check.
+      let activeConnections: number | undefined;
+      try {
+        const connRes = await client.query("SELECT count(*) FROM pg_stat_activity");
+        activeConnections = parseInt(connRes.rows[0].count);
+      } catch {
+        activeConnections = undefined;
+      }
 
-      const sizeRes = await client.query("SELECT pg_size_pretty(pg_database_size($1))", [this.config.database]);
+      let databaseSize = "N/A";
+      try {
+        const sizeRes = await client.query("SELECT pg_size_pretty(pg_database_size($1))", [this.config.database]);
+        databaseSize = sizeRes.rows[0].pg_size_pretty;
+      } catch {
+        databaseSize = "N/A";
+      }
 
-      const cacheRes = await client.query(HEALTH_CACHE_HIT_SQL);
-      // A NULL ratio used to arrive here as the SQL's own invented 100; unguarded,
-      // it would now arrive as the string "null%".
-      const healthCacheHitRatio = measuredNumber(cacheRes.rows[0]?.ratio);
+      let cacheHitRatio = CACHE_HIT_RATIO_UNAVAILABLE;
+      try {
+        const cacheRes = await client.query(HEALTH_CACHE_HIT_SQL);
+        // A NULL ratio used to arrive here as the SQL's own invented 100; unguarded,
+        // it would now arrive as the string "null%".
+        const healthCacheHitRatio = measuredNumber(cacheRes.rows[0]?.ratio);
+        cacheHitRatio =
+          healthCacheHitRatio === undefined
+            ? CACHE_HIT_RATIO_UNAVAILABLE
+            : `${formatCacheHitRatio(healthCacheHitRatio)}%`;
+      } catch {
+        cacheHitRatio = CACHE_HIT_RATIO_UNAVAILABLE;
+      }
 
       let slowQueries: SlowQuery[] = [];
       try {
@@ -1239,24 +1560,25 @@ export class PostgresProvider extends SQLBaseProvider {
         slowQueries = [{ query: "pg_stat_statements extension not enabled", calls: 0, avgTime: "N/A" }];
       }
 
-      const sessionsRes = await client.query(HEALTH_SESSIONS_SQL, [this.config.database]);
-
-      const activeSessions: ActiveSession[] = sessionsRes.rows.map((r) => ({
-        pid: r.pid,
-        user: r.user || "unknown",
-        database: r.database || "",
-        state: r.state,
-        query: r.query || "",
-        duration: r.duration,
-      }));
+      let activeSessions: ActiveSession[] = [];
+      try {
+        const sessionsRes = await client.query(HEALTH_SESSIONS_SQL, [this.config.database]);
+        activeSessions = sessionsRes.rows.map((r) => ({
+          pid: r.pid,
+          user: r.user || "unknown",
+          database: r.database || "",
+          state: r.state,
+          query: r.query || "",
+          duration: r.duration,
+        }));
+      } catch {
+        activeSessions = [];
+      }
 
       return {
-        activeConnections: parseInt(connRes.rows[0].count),
-        databaseSize: sizeRes.rows[0].pg_size_pretty,
-        cacheHitRatio:
-          healthCacheHitRatio === undefined
-            ? CACHE_HIT_RATIO_UNAVAILABLE
-            : `${formatCacheHitRatio(healthCacheHitRatio)}%`,
+        activeConnections,
+        databaseSize,
+        cacheHitRatio,
         slowQueries,
         activeSessions,
       };
@@ -1369,34 +1691,74 @@ export class PostgresProvider extends SQLBaseProvider {
 
     const client = await this.pool!.connect();
     try {
-      // Get version and uptime
-      const infoRes = await client.query(OVERVIEW_INFO_SQL);
+      // Engines with no pg statistics catalog at all (Materialize, RisingWave) reject
+      // every query below except version(). Each is isolated so one missing catalog
+      // degrades that one field instead of failing the whole overview.
+      const versionRes = await client.query(OVERVIEW_VERSION_SQL);
+      const version = versionRes.rows[0].version?.split(",")[0] || "PostgreSQL";
 
-      // Get connection counts
-      const connRes = await client.query(OVERVIEW_CONNECTIONS_SQL, [this.config.database]);
+      let uptime = "N/A";
+      let startTime: Date | undefined;
+      try {
+        const uptimeRes = await client.query(OVERVIEW_UPTIME_SQL);
+        const uptimeSeconds = parseInt(uptimeRes.rows[0].uptime_seconds || "0");
+        const days = Math.floor(uptimeSeconds / 86400);
+        const hours = Math.floor((uptimeSeconds % 86400) / 3600);
+        const minutes = Math.floor((uptimeSeconds % 3600) / 60);
+        uptime = days > 0 ? `${days}d ${hours}h ${minutes}m` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        startTime = uptimeRes.rows[0].start_time ? new Date(uptimeRes.rows[0].start_time) : undefined;
+      } catch {
+        uptime = "N/A";
+        startTime = undefined;
+      }
 
-      // Get database size
-      const sizeRes = await client.query(OVERVIEW_SIZE_SQL, [this.config.database]);
+      let activeConnections: number | undefined;
+      let maxConnections = 0;
+      try {
+        const connRes = await client.query(OVERVIEW_CONNECTIONS_SQL, [this.config.database]);
+        activeConnections = parseInt(connRes.rows[0].active_connections || "0");
+        maxConnections = parseInt(connRes.rows[0].max_connections || "100");
+      } catch {
+        activeConnections = undefined;
+        maxConnections = 0;
+      }
 
-      // Get table and index counts (all user schemas)
-      const countRes = await client.query(OVERVIEW_COUNTS_SQL);
+      let databaseSize = "N/A";
+      let databaseSizeBytes: number | undefined;
+      try {
+        const sizeRes = await client.query(OVERVIEW_SIZE_SQL, [this.config.database]);
+        databaseSize = sizeRes.rows[0].database_size || "0 bytes";
+        databaseSizeBytes = parseInt(sizeRes.rows[0].database_size_bytes || "0");
+      } catch {
+        databaseSize = "N/A";
+        databaseSizeBytes = undefined;
+      }
 
-      const uptimeSeconds = parseInt(infoRes.rows[0].uptime_seconds || "0");
-      const days = Math.floor(uptimeSeconds / 86400);
-      const hours = Math.floor((uptimeSeconds % 86400) / 3600);
-      const minutes = Math.floor((uptimeSeconds % 3600) / 60);
-      const uptime = days > 0 ? `${days}d ${hours}h ${minutes}m` : hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+      let tableCount = 0;
+      let indexCount = 0;
+      try {
+        // Through the same chain the object browser uses, not a bare query: this one
+        // also carries the ownership clause, and an engine that cannot evaluate
+        // pg_depend must drop it and answer rather than fall into the catch below,
+        // which would report 0 tables - a measurement nobody made.
+        const countRes = await this.queryWithMaterializedFallback(client, OVERVIEW_COUNTS_SQL);
+        tableCount = parseInt(countRes.rows[0].table_count || "0");
+        indexCount = parseInt(countRes.rows[0].index_count || "0");
+      } catch {
+        tableCount = 0;
+        indexCount = 0;
+      }
 
       return {
-        version: infoRes.rows[0].version?.split(",")[0] || "PostgreSQL",
+        version,
         uptime,
-        startTime: infoRes.rows[0].start_time ? new Date(infoRes.rows[0].start_time) : undefined,
-        activeConnections: parseInt(connRes.rows[0].active_connections || "0"),
-        maxConnections: parseInt(connRes.rows[0].max_connections || "100"),
-        databaseSize: sizeRes.rows[0].database_size || "0 bytes",
-        databaseSizeBytes: parseInt(sizeRes.rows[0].database_size_bytes || "0"),
-        tableCount: parseInt(countRes.rows[0].table_count || "0"),
-        indexCount: parseInt(countRes.rows[0].index_count || "0"),
+        startTime,
+        activeConnections,
+        maxConnections,
+        databaseSize,
+        databaseSizeBytes,
+        tableCount,
+        indexCount,
       };
     } finally {
       client.release();
@@ -1411,12 +1773,25 @@ export class PostgresProvider extends SQLBaseProvider {
 
     const client = await this.pool!.connect();
     try {
-      // Get cache hit ratio
-      const cacheRes = await client.query(PERF_CACHE_HIT_SQL);
-      const cacheHitRatio = measuredNumber(cacheRes.rows[0]?.cache_hit_ratio);
+      // Get cache hit ratio. Absent (not 0) when pg_statio_user_tables does not exist
+      // at all (Materialize, RisingWave), same as the other statistics-catalog reads.
+      let cacheHitRatio: number | undefined;
+      try {
+        const cacheRes = await client.query(PERF_CACHE_HIT_SQL);
+        cacheHitRatio = measuredNumber(cacheRes.rows[0]?.cache_hit_ratio);
+      } catch {
+        cacheHitRatio = undefined;
+      }
 
-      // Get transaction stats
-      const txRes = await client.query(PERF_TRANSACTION_STATS_SQL, [this.config.database]);
+      // Get transaction stats. A missing pg_stat_database leaves txRow undefined, and
+      // deadlocks below is already written to stay absent rather than default to 0.
+      let txRow: { deadlocks?: unknown } | undefined;
+      try {
+        const txRes = await client.query(PERF_TRANSACTION_STATS_SQL, [this.config.database]);
+        txRow = txRes.rows[0];
+      } catch {
+        txRow = undefined;
+      }
 
       // Get checkpoint stats (optional - columns may not exist in older PG versions)
       // "N/A" from the start rather than "0", so an unread counter never leaves
@@ -1442,7 +1817,6 @@ export class PostgresProvider extends SQLBaseProvider {
       // No `|| "0"` here: pg_stat_database answers no row at all for a database it
       // has no entry for, and a deadlock count of 0 is a claim ("this database has
       // deadlocked zero times") rather than the absence of a reading.
-      const txRow = txRes.rows[0];
       const deadlocks = measuredNumber(txRow?.deadlocks);
 
       return {
@@ -1497,20 +1871,26 @@ export class PostgresProvider extends SQLBaseProvider {
       } catch {
         // Fallback: use pg_stat_activity for currently running queries
         // This doesn't provide historical stats, but shows active queries
-        const fallbackRes = await client.query(SLOW_QUERIES_FALLBACK_SQL, [this.config.database, limit]);
+        try {
+          const fallbackRes = await client.query(SLOW_QUERIES_FALLBACK_SQL, [this.config.database, limit]);
 
-        return fallbackRes.rows.map((r) => ({
-          queryId: r.query_id,
-          query: r.query || "",
-          calls: parseInt(r.calls || "1"),
-          totalTime: parseFloat(r.total_time || "0"),
-          avgTime: parseFloat(r.avg_time || "0"),
-          minTime: undefined,
-          maxTime: undefined,
-          rows: parseInt(r.rows || "0"),
-          sharedBlksHit: undefined,
-          sharedBlksRead: undefined,
-        }));
+          return fallbackRes.rows.map((r) => ({
+            queryId: r.query_id,
+            query: r.query || "",
+            calls: parseInt(r.calls || "1"),
+            totalTime: parseFloat(r.total_time || "0"),
+            avgTime: parseFloat(r.avg_time || "0"),
+            minTime: undefined,
+            maxTime: undefined,
+            rows: parseInt(r.rows || "0"),
+            sharedBlksHit: undefined,
+            sharedBlksRead: undefined,
+          }));
+        } catch {
+          // No pg_stat_statements AND no pg_stat_activity (Materialize, RisingWave):
+          // no statistics catalog at all, so there is nothing to show, not a failure.
+          return [];
+        }
       }
     } finally {
       client.release();
@@ -1526,23 +1906,29 @@ export class PostgresProvider extends SQLBaseProvider {
 
     const client = await this.pool!.connect();
     try {
-      const res = await client.query(ACTIVE_SESSIONS_SQL, [this.config.database, limit]);
+      // No pg_stat_activity at all (Materialize, RisingWave): no sessions to show,
+      // not a failure - matches getSlowQueries()'s exhausted-fallback behavior.
+      try {
+        const res = await client.query(ACTIVE_SESSIONS_SQL, [this.config.database, limit]);
 
-      return res.rows.map((r) => ({
-        pid: r.pid,
-        user: r.user || "unknown",
-        database: r.database || "",
-        applicationName: r.application_name || undefined,
-        clientAddr: r.client_addr || undefined,
-        state: r.state,
-        query: r.query || "",
-        queryStart: r.query_start ? new Date(r.query_start) : undefined,
-        duration: r.duration,
-        durationMs: parseFloat(r.duration_ms || "0"),
-        waitEventType: r.wait_event_type || undefined,
-        waitEvent: r.wait_event || undefined,
-        blocked: false, // Could be enhanced with pg_locks query
-      }));
+        return res.rows.map((r) => ({
+          pid: r.pid,
+          user: r.user || "unknown",
+          database: r.database || "",
+          applicationName: r.application_name || undefined,
+          clientAddr: r.client_addr || undefined,
+          state: r.state,
+          query: r.query || "",
+          queryStart: r.query_start ? new Date(r.query_start) : undefined,
+          duration: r.duration,
+          durationMs: parseFloat(r.duration_ms || "0"),
+          waitEventType: r.wait_event_type || undefined,
+          waitEvent: r.wait_event || undefined,
+          blocked: false, // Could be enhanced with pg_locks query
+        }));
+      } catch {
+        return [];
+      }
     } finally {
       client.release();
     }
@@ -1558,9 +1944,7 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema
-        ? `WHERE schemaname = $1`
-        : `WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`;
+      const whereClause = schema ? `WHERE schemaname = $1` : `WHERE ${schemaExclusion("schemaname")}`;
       const params = schema ? [schema] : [];
 
       const res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
@@ -1596,9 +1980,7 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema
-        ? `WHERE s.schemaname = $1`
-        : `WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`;
+      const whereClause = schema ? `WHERE s.schemaname = $1` : `WHERE ${schemaExclusion("s.schemaname")}`;
       const params = schema ? [schema] : [];
 
       const res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);

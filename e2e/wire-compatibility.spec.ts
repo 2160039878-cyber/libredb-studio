@@ -58,7 +58,12 @@ test.describe("Wire compatibility hint", () => {
     await expect(hint).toBeVisible();
     await expect(hint).toContainText("CockroachDB");
     await expect(hint.getByTestId("wire-compat-tier-CockroachDB")).toContainText("partial support");
-    await expect(hint.getByTestId("wire-compat-tier-Materialize")).toContainText("query editor only");
+    // Materialize moved from query-only to partial (#578): its object browser now recovers
+    // real table/column data through a schema-query fallback chain, though foreign keys and
+    // indexes still don't. RisingWave stays query-only, so it carries the wording Materialize
+    // used to.
+    await expect(hint.getByTestId("wire-compat-tier-Materialize")).toContainText("partial support");
+    await expect(hint.getByTestId("wire-compat-tier-RisingWave")).toContainText("query editor only");
     // QuestDB must NOT appear here (#424, probed 2026-08-26 and refused a row): it speaks the
     // PostgreSQL wire protocol and a statement answers through the provider, but the editor
     // cannot run anything - `SELECT pg_backend_pid()` precedes every run with a queryId and
