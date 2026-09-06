@@ -93,6 +93,25 @@ function makePgConfig(overrides: Partial<DatabaseConnection> = {}): DatabaseConn
 /**
  * Default mock query that matches SQL patterns and returns appropriate mock data.
  */
+// A SQL rewrite that drops a bracket still satisfies "does not contain X", so the
+// rewrite tests below pair every such assertion with this: it reports imbalance
+// rather than a bare false, so a failure says which direction the rewrite broke.
+function countParens(sql: string): { balanced: boolean; open?: number; close?: number } {
+  let depth = 0;
+  let open = 0;
+  let close = 0;
+  for (const ch of sql) {
+    if (ch === "(") {
+      open++;
+      depth++;
+    } else if (ch === ")") {
+      close++;
+      depth--;
+    }
+  }
+  return depth === 0 ? { balanced: true } : { balanced: false, open, close };
+}
+
 function defaultMockQuery(sql: string): Promise<{ rows: unknown[]; fields?: { name: string }[]; rowCount?: number }> {
   const normalized = sql.trim().toLowerCase();
 
@@ -1357,6 +1376,242 @@ describe("PostgresProvider", () => {
       await provider.connect();
 
       await expect(provider.getSchema()).rejects.toThrow(QueryError);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // System-schema exclusion set (engine internals must never count as user data)
+  // --------------------------------------------------------------------------
+
+  describe("system-schema exclusion set", () => {
+    // Each name below was read off that engine's own documentation and then
+    // confirmed against a live instance. They are the schemas a wire-compatible
+    // engine puts in pg_tables/information_schema alongside a user's own tables.
+    const DOCUMENTED_ENGINE_SCHEMAS = [
+      // Materialize - materialize.com/docs/sql/system-catalog/
+      "mz_catalog",
+      "mz_internal",
+      "mz_introspection",
+      // CockroachDB - cockroachlabs.com/docs/stable/system-catalogs
+      "crdb_internal",
+      "pg_extension",
+      // TimescaleDB - timescaledb/sql/pre_install/schemas.sql
+      "_timescaledb_catalog",
+      "_timescaledb_config",
+      "_timescaledb_functions",
+      "_timescaledb_internal",
+      "_timescaledb_cache",
+      "timescaledb_experimental",
+      "timescaledb_information",
+      // Apache Cloudberry - cloudberry.apache.org create-and-manage-schemas
+      "gp_toolkit",
+      "pg_aoseg",
+      "pg_bitmapindex",
+      "pg_ext_aux",
+      // AlloyDB Omni - created by the google_ml_integration extension
+      "google_ml",
+    ];
+
+    // Capture every statement the provider sends while exercising the surfaces
+    // that filter by schema, so the assertion below covers all of them at once
+    // rather than a hand-copied list that a new query could silently escape.
+    async function captureSchemaFilteredSql(): Promise<string[]> {
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+      await provider.getSchemaList();
+      await provider.getSchemaRelations();
+      await provider.getOverview();
+      await provider.getTableStats();
+      await provider.getIndexStats();
+      return seen.filter((sql) => sql.includes("NOT IN ('pg_catalog'"));
+    }
+
+    test("every schema-filtered query excludes all documented engine internals", async () => {
+      const filtered = await captureSchemaFilteredSql();
+
+      // Non-vacuity: the surfaces above really do emit schema filters. The count
+      // is read off the capture rather than pinned, so adding a query cannot make
+      // this guard silently stop covering it.
+      expect(filtered.length).toBeGreaterThan(0);
+
+      for (const sql of filtered) {
+        for (const schema of DOCUMENTED_ENGINE_SCHEMAS) {
+          expect(sql).toContain(`'${schema}'`);
+        }
+      }
+    });
+
+    test("every CTE in the schema queries filters by schema, not just some of them", async () => {
+      // tables_info/columns_info/index_info carried the exclusion while pk_info and
+      // fk_info did not, so getSchemaRelations() still listed _timescaledb_catalog
+      // and google_ml relations through the FK side of its FULL OUTER JOIN even
+      // after the object browser stopped showing them. Every CTE here reads
+      // per-table metadata, so every one of them needs the filter.
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+      await provider.getSchemaRelations();
+
+      const schemaQueries = seen.filter((sql) => sql.includes("_info AS MATERIALIZED ("));
+      expect(schemaQueries.length).toBeGreaterThan(0);
+
+      // Split each query into its CTE bodies and require the filter in every one.
+      // The count comes off the split, so a CTE added later is covered automatically.
+      const unfiltered: string[] = [];
+      for (const sql of schemaQueries) {
+        // Splitting on the CTE header yields [prefix, name, body, name, body, ...],
+        // so each body runs exactly to the next CTE and cannot borrow its filter.
+        const parts = sql.split(/(\w+) AS MATERIALIZED \(/);
+        expect(parts.length).toBeGreaterThan(1);
+        for (let i = 1; i < parts.length; i += 2) {
+          if (!parts[i + 1].includes("NOT IN ('pg_catalog'")) unfiltered.push(parts[i]);
+        }
+      }
+      expect(unfiltered).toEqual([]);
+    });
+
+    test("getOverview() counts exclude CockroachDB's crdb_internal and pg_extension", async () => {
+      // Measured on CockroachDB v26.2.5: a database with two user tables answers
+      // 98 rows from pg_tables, 93 of them crdb_internal and 3 pg_extension. The
+      // object browser reads information_schema and correctly says 2, so an
+      // unfiltered count makes the two panels disagree.
+      let countsSql = "";
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("as table_count")) countsSql = sql;
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getOverview();
+
+      expect(countsSql).toContain("'crdb_internal'");
+      expect(countsSql).toContain("'pg_extension'");
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Foreign-key catalog fallback (Materialize has no constraint_column_usage)
+  // --------------------------------------------------------------------------
+
+  describe("missing constraint_column_usage fallback", () => {
+    // Measured on Materialize v26.37.0: key_column_usage and table_constraints
+    // both exist, but constraint_column_usage does not, so the whole schema query
+    // fails even after the MATERIALIZED/size/json fallbacks have cleared their
+    // gaps. Foreign keys are genuinely unknowable there; every other column is not.
+    function rejectConstraintColumnUsage(onRetry: (sql: string) => ReturnType<typeof defaultMockQuery>) {
+      mockQueryFn = async (sql: string) => {
+        if (sql.includes("constraint_column_usage")) {
+          return Promise.reject(new Error("unknown catalog item 'information_schema.constraint_column_usage'"));
+        }
+        const result = await onRetry(sql);
+        // The canned rows carry foreign keys whatever SQL arrives, so asserting on
+        // them would test the fixture rather than the rewrite. Model what the engine
+        // actually does instead: an emptied fk_info CTE joins to nothing, and the
+        // outer COALESCE turns that into []. Keyed on the emptied CTE's own marker so
+        // the fixture cannot answer [] for a query that still asked for real keys.
+        if (!sql.includes("WHERE false")) return result;
+        return {
+          ...result,
+          rows: result.rows.map((row) =>
+            row !== null && typeof row === "object" && "foreign_keys" in row ? { ...row, foreign_keys: [] } : row,
+          ),
+        };
+      };
+    }
+
+    test("getSchema() returns tables with no foreign keys instead of failing", async () => {
+      rejectConstraintColumnUsage(defaultMockQuery);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+      // Absent, not invented: the retry drops the FK join rather than guessing.
+      for (const table of schema) {
+        expect(table.foreignKeys).toEqual([]);
+      }
+    });
+
+    test("getSchemaRelations() still returns index data once the FK join is dropped", async () => {
+      rejectConstraintColumnUsage(defaultMockQuery);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const relations = await provider.getSchemaRelations();
+      expect(Array.isArray(relations)).toBe(true);
+    });
+
+    test("the retried statement no longer reads constraint_column_usage", async () => {
+      const attempts: string[] = [];
+      mockQueryFn = (sql: string) => {
+        attempts.push(sql);
+        if (sql.includes("constraint_column_usage")) {
+          return Promise.reject(new Error("unknown catalog item 'information_schema.constraint_column_usage'"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+
+      // Two attempts: the original, then one that has dropped the FK catalog.
+      expect(attempts.length).toBe(2);
+      expect(attempts[0]).toContain("constraint_column_usage");
+      expect(attempts[1]).not.toContain("constraint_column_usage");
+      // The CTE itself must survive - the outer query joins it by name.
+      expect(attempts[1]).toContain("fk_info");
+      // A rewrite that ate a bracket would still satisfy the assertions above.
+      expect(countParens(attempts[1])).toEqual({ balanced: true });
+    });
+
+    test("getSchemaList(), which never joins the FK catalog, rethrows instead of retrying blind", async () => {
+      // SCHEMA_LIST_SQL has no fk_info CTE to drop, so there is nothing this
+      // fallback can rewrite. It must surface the error rather than loop or
+      // quietly hand back a query it did not actually repair.
+      mockQueryFn = () =>
+        Promise.reject(new Error("unknown catalog item 'information_schema.constraint_column_usage'"));
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      await expect(provider.getSchemaList()).rejects.toThrow(QueryError);
+    });
+
+    test("Materialize's full sequence: keyword, size builtin, json_agg, then the FK catalog", async () => {
+      const attempts: string[] = [];
+      mockQueryFn = (sql: string) => {
+        attempts.push(sql);
+        if (sql.includes("AS MATERIALIZED (")) {
+          return Promise.reject(new Error("Expected left parenthesis, found MATERIALIZED"));
+        }
+        if (sql.includes("pg_total_relation_size(c.oid)")) {
+          return Promise.reject(new Error('function "pg_total_relation_size" does not exist'));
+        }
+        if (sql.includes("json_agg(")) {
+          return Promise.reject(new Error('function "json_agg" does not exist'));
+        }
+        if (sql.includes("constraint_column_usage")) {
+          return Promise.reject(new Error("unknown catalog item 'information_schema.constraint_column_usage'"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+      expect(attempts.length).toBe(5);
+      expect(countParens(attempts[4])).toEqual({ balanced: true });
     });
   });
 

@@ -123,7 +123,7 @@ If you edit these queries, keep `MATERIALIZED` or you reintroduce the timeout.
 **Fallback chain for engines that reject part of this query (#38680).** `getSchema()`,
 `getSchemaList()`, and `getSchemaRelations()` all route their query through
 `queryWithMaterializedFallback()` ([postgres.ts](../../src/lib/db/providers/sql/postgres.ts)), which
-recovers real object-browser data on three independent gaps instead of failing outright:
+recovers real object-browser data on four independent gaps instead of failing outright:
 
 1. **The `MATERIALIZED` keyword itself.** Materialize and RisingWave reserve it for their own
    `CREATE MATERIALIZED VIEW` grammar and reject the CTE modifier, even though the underlying
@@ -135,6 +135,13 @@ recovers real object-browser data on three independent gaps instead of failing o
 3. **`json_agg()` / `json_build_object()`.** Materialize has neither, only the `jsonb_` forms
    (verified: they return the identical shape over the wire — `pg` parses both OIDs into plain JS
    values). `withoutJsonAggFunctions()` swaps the function names.
+4. **`information_schema.constraint_column_usage`.** Materialize answers `table_constraints` and
+   `key_column_usage` but not this one, and it is the only one of the three that names the table a
+   foreign key points *at* — so the relationship is genuinely unknowable there while every other
+   column in the same query is not. `withoutForeignKeyCatalog()` empties the `fk_info` CTE rather
+   than dropping it, which keeps the outer `LEFT JOIN`/`FULL OUTER JOIN` valid and leaves
+   `foreignKeys` as `[]`. It matches the closing parenthesis by depth, not by text, because the
+   three fallbacks above have already rewritten parts of the statement by the time it runs.
 
 Each fallback is matched against whichever error actually comes back, not tried in a fixed order —
 CockroachDB hits #2 as its *first* error with #1 never in play, Materialize hits all three in
@@ -142,18 +149,54 @@ sequence. Real PostgreSQL never takes any retry path; it accepts every construct
 attempt succeeds. An error no fallback recognizes, or one that survives every applicable fallback, is
 mapped through `mapDatabaseError()` and rethrown rather than left raw.
 
-**What still doesn't work.** Materialize has no `information_schema.constraint_column_usage`, so
-`getSchemaRelations()` (foreign keys/indexes) fails outright there — the two-phase split in §3.3
-means this degrades to "table list unaffected" rather than blocking the object browser entirely.
-RisingWave's object browser remains unavailable for a different, unrelated reason: its query binder
-fails on the `LEFT JOIN pg_class ON (...)::regclass` pattern itself (`missing FROM-clause entry for
-table c`), which none of the three fallbacks above address.
+**What still doesn't work.** On Materialize, foreign keys and indexes come back empty (see gap #4);
+sizes are unmeasured (gap #2). RisingWave's object browser remains unavailable for a different,
+unrelated reason: its query binder fails on the `LEFT JOIN pg_class ON (...)::regclass` pattern
+itself (`missing FROM-clause entry for table c`), which none of the four fallbacks above address.
 
-**Materialize's own catalog also joins the schema exclusion list.** `mz_catalog`/`mz_internal` were
-added beside `pg_catalog`/`information_schema`/`pg_toast` everywhere that list appears in this file
-(schema, table stats, index stats) — real PostgreSQL never has schemas by those names, so it's a
-no-op there, but without it Materialize's own system catalog floods the object browser with dozens
-of internal relations.
+A statement that never joined the catalog a fallback repairs is *not* retried blind:
+`withoutForeignKeyCatalog()` returns the SQL untouched when there is no `fk_info` CTE to empty
+(`SCHEMA_LIST_SQL` has none), so the rejection is mapped and rethrown on the next attempt instead of
+looping on a statement nothing changed.
+
+### 3.1.1 The system-schema exclusion set
+
+`SYSTEM_SCHEMAS` ([postgres.ts](../../src/lib/db/providers/sql/postgres.ts)) is single-sourced and
+interpolated into every `NOT IN (...)` clause in the file, so a query added later cannot filter on a
+shorter list than the rest. Every name was read off that engine's own documentation and then
+confirmed against a live instance; stock PostgreSQL creates none of them, so excluding them there is
+a no-op — measured, not assumed: PostgreSQL 18.4 and YugabyteDB 2.25.2 both answer `public` and
+nothing else.
+
+Two separate defects made this load-bearing rather than cosmetic, and they pull in opposite
+directions because the two readers use different catalogs:
+
+- **The object browser** reads `information_schema.tables` with `table_type = 'BASE TABLE'`. That
+  filter hides an engine's *views* but not its internal *tables*, so it listed 61 objects on
+  TimescaleDB where 2 were the user's (34 hypertable chunks in `_timescaledb_internal`, 22 in
+  `_timescaledb_catalog`, 3 in `_timescaledb_cache`), 10 on AlloyDB Omni (`google_ml`) and 4 on
+  Apache Cloudberry (`pg_ext_aux`).
+- **`OVERVIEW_COUNTS_SQL`** counts `pg_tables` directly, which has no `table_type` column to filter
+  on. On CockroachDB that answered 98 for the same 2 tables — 93 `crdb_internal`, 3 `pg_extension` —
+  so the Monitoring overview and the Explorer badge disagreed inside one app.
+
+Every CTE in the schema queries carries the filter, not just some: `pk_info` and `fk_info` were
+missing it while `tables_info`, `columns_info` and `index_info` had it, which let
+`getSchemaRelations()` keep listing `_timescaledb_catalog` and `google_ml` relations through the FK
+side of its `FULL OUTER JOIN` after the browser had stopped showing them.
+
+Citations, by engine: Materialize's
+[system catalog](https://materialize.com/docs/sql/system-catalog/) (`mz_catalog`, `mz_internal`,
+`mz_introspection`); CockroachDB's
+[system catalogs](https://www.cockroachlabs.com/docs/stable/system-catalogs), which enumerates
+exactly four (`crdb_internal` and `pg_extension` are the two stock PostgreSQL lacks); TimescaleDB's
+own `sql/pre_install/schemas.sql`, which creates all seven; Cloudberry's
+[schema documentation](https://cloudberry.apache.org/docs/operate-with-data/operate-with-db-objects/create-and-manage-schemas/)
+for `gp_toolkit`, `pg_aoseg` and `pg_bitmapindex`. Two entries rest on measurement rather than a
+document, and are marked as such in the code: Cloudberry's `pg_ext_aux` (the PAX auxiliary tables),
+which its schema page does not list, and AlloyDB's `google_ml`, which Google's docs never name —
+traced through `pg_depend` to the `google_ml_integration` extension the Omni image enables by
+default.
 
 ### 3.2 Schema SQL hoisted to module scope
 

@@ -199,6 +199,7 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     caveats: [
       "The object browser now lists real tables (previously empty, #38680): the schema query recovers from the missing pg_total_relation_size() builtin by falling back to an unmeasured (0-byte) size instead of failing outright. Foreign keys and indexes are unaffected by this and continue to work.",
       "The overview panel loads with connections/size/uptime marked unavailable rather than failing outright: pg_postmaster_start_time(), pg_size_pretty() and pg_tablespace_location() do not exist there.",
+      "Its table and index counts are the user's own. CockroachDB documents exactly four system schemas, and crdb_internal objects reach pg_tables even though information_schema's BASE TABLE filter never shows them - so before those two schemas were excluded, the overview counted 98 tables (93 crdb_internal, 3 pg_extension) for the 2 the object browser listed, and the two panels disagreed inside one app.",
       "Performance metrics, slow queries and active sessions do work: the pg_stat_* views CockroachDB provides are enough for them.",
     ],
   },
@@ -208,7 +209,7 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     tier: "partial",
     probedVersion: "Materialize 26.40.0 (advertises PostgreSQL 9.5)",
     caveats: [
-      "The object browser lists tables and columns (previously nothing worked at all, #38680): the schema query recovers from the reserved MATERIALIZED keyword, the missing pg_total_relation_size() builtin, and json_agg()/json_build_object() (Materialize only has the jsonb_ equivalents) by retrying without each. Foreign keys and indexes stay unavailable: Materialize has no information_schema.constraint_column_usage.",
+      "The object browser lists tables and columns (previously nothing worked at all, #38680): the schema query recovers from four gaps by retrying without each - the reserved MATERIALIZED keyword, the missing pg_total_relation_size() builtin, json_agg()/json_build_object() (Materialize only has the jsonb_ equivalents), and information_schema.constraint_column_usage, which is the only one of the three constraint views it lacks and the only one that names the table a foreign key points at. Foreign keys therefore stay absent rather than wrong, and indexes come back empty. The '[]'::json casts in the same queries are left alone: the cast was measured working on a live instance even though Materialize documents no json type.",
       "The monitoring dashboard loads with every statistic marked unavailable rather than erroring the whole page: Materialize has no pg statistics catalog and no size functions.",
     ],
   },
@@ -240,8 +241,8 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     tier: "full",
     probedVersion: "TimescaleDB 2.29.2 on PostgreSQL 17.11",
     caveats: [
-      "Row counts and sizes for a hypertable are wrong rather than missing: PostgreSQL statistics describe the empty parent table, not the chunks the rows live in.",
-      "Every chunk of a hypertable appears as its own table and index, so the object browser fills with _timescaledb_internal chunks and the _timescaledb_catalog and _timescaledb_cache schemas.",
+      "Row counts and sizes for a hypertable are wrong rather than missing: PostgreSQL statistics describe the empty parent table, not the chunks the rows live in. Measured on a 31-chunk hypertable, pg_total_relation_size() answered 24576 bytes where the extension's own hypertable_size() answered 2498560 - about a hundredfold understatement. Excluding the chunk schemas from the browser does not change this, because the parent is what the size is read from either way.",
+      "The object browser now lists only user tables. TimescaleDB's own seven schemas are excluded, so a database whose sole hypertable had 31 chunks went from 61 objects to the 2 the user created: 34 came from _timescaledb_internal, 22 from _timescaledb_catalog and 3 from _timescaledb_cache.",
       "The overview shows the PostgreSQL version, not the TimescaleDB extension version.",
       "The agent grounds a stock install: the column capture is one row per table rather than one row per column, so the extension's own catalogs no longer overflow the 200-row budget. On a database with real hypertable data every chunk still appears as its own table in the inventory.",
     ],
@@ -266,7 +267,7 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     caveats: [
       "Table statistics and index statistics are unavailable: both fail with the same engine error, \"query plan with multiple segworker groups is not supported\", which is Cloudberry's MPP planner restriction rather than a missing catalog. The monitoring dashboard itself answers - its overview and performance tabs read connections, database size, table count, deadlocks and checkpoint stats normally - and it is specifically the Tables tab's per-table breakdown and the Storage tab's largest-tables list that fail. Each failing panel says \"This database could not answer this panel\" and prints the engine's error under it, so the planner restriction is not presented as a connection fault.",
       "Row counts and sizes read after ANALYZE are correct - 2000 rows for 2000 rows and 576 KB for 589824 bytes - so the object browser here is not the kind that misleads; what they read before ANALYZE was not probed.",
-      "Two internal tables appear in the object browser, pg_ext_aux.pg_pax_fastsequence and pg_ext_aux.pg_pax_tables, so it lists 4 objects for 2 user tables.",
+      "The object browser now lists only user tables: pg_ext_aux, which holds the PAX auxiliary tables pg_pax_fastsequence and pg_pax_tables, is excluded along with gp_toolkit, pg_aoseg and pg_bitmapindex, so the count went from 4 objects to the 2 the user created. Cloudberry's schema documentation lists the latter three but not pg_ext_aux, which is here on measurement rather than on the doc's authority.",
       "A foreign key is read back as if it were enforced but is not: Cloudberry accepts ALTER TABLE ... ADD CONSTRAINT with a warning that referential integrity constraints are not supported, and an orphan insert then succeeds.",
       "The overview's database size reads 62 MB against roughly 900 KB of user tables, which is catalog and segment overhead rather than your data.",
       "The agent needs a least-privilege agent role to ground a run: connecting as the cluster's own gpadmin is refused because the execution profile reads that role as too broad. With that role the capture succeeds.",
@@ -281,7 +282,7 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     caveats: [
       'The version panel cannot be told apart from a stock PostgreSQL 17: version() reports only "PostgreSQL 17.9 on x86_64-pc-linux-gnu" and names AlloyDB nowhere, so the product identity is visible only in the alloydb.* settings and in the image tag.',
       "Row counts and sizes are exact, checked against the engine: 2000 rows read as 2000, and 270336 total bytes as 270336 (180224 table plus 90112 index). Foreign keys are both read back and enforced.",
-      "Eight of AlloyDB's own google_ml tables appear in the object browser, so it lists 10 objects for 2 user tables: auth_info, embed_gen_progress, embed_gen_settings, model_family_info, models, native_models, proxy_models_query_mapping and supported_vertex_models.",
+      "The object browser now lists only user tables. AlloyDB's google_ml schema, created by the google_ml_integration extension the image enables by default, is excluded, so the count went from 10 objects to the 2 the user created. Google's documentation names the extension but never the schema; it was traced through pg_depend on a live instance.",
       "The browser understates what the image installed: outside the system schemas there are 70 objects for 2 user tables, because 49 extension VIEWS are installed into public itself (g_columnar_* x27, google_db_advisor_* x18, g_agg_stat_statements, g_lap_timer, hypopg_list_indexes and a columnar vectorized-join view), plus 4 views in ai and 11 more in google_ml. They are hidden only because the schema query filters table_type = 'BASE TABLE'.",
       "Those eight google_ml tables are readable by a role with no grants at all: a LOGIN role given only CONNECT, with ALL revoked on schema public, still lists them and answered SELECT count(*) FROM google_ml.supported_vertex_models with 15 rows.",
       'The slow-query panel is always empty and health says why: pg_stat_statements ships with the image but is not installed in it, reported as "pg_stat_statements extension not enabled".',

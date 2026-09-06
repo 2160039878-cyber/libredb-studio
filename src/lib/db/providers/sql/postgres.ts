@@ -93,13 +93,59 @@ type SchemaRelationRow = Pick<SchemaRow, "table_schema" | "table_name" | "foreig
 // each CTE to compute once — ~295s -> ~2.6s on a 122-table schema.
 // ============================================================================
 
+// Schemas that hold engine internals rather than a user's own tables, single-sourced
+// so a new query cannot filter on a shorter list than the rest of the file. Every
+// entry was read off that engine's own documentation and then confirmed against a
+// live instance; stock PostgreSQL creates none of them, so excluding them there is a
+// no-op. Two separate defects made this list load-bearing rather than cosmetic:
+// the object browser reads information_schema and listed 61 tables on TimescaleDB
+// where 2 were the user's (34 chunk tables, 22 catalog, 3 cache), 10 on AlloyDB Omni
+// and 4 on Cloudberry; and the overview counts pg_tables directly, which on
+// CockroachDB answers 98 for the same 2 tables because crdb_internal objects reach
+// pg_tables but not information_schema's BASE TABLE filter - so the two panels
+// disagreed inside one app. Sorted by engine, not alphabetically, so each group can
+// be checked against its citation.
+const SYSTEM_SCHEMAS = [
+  // PostgreSQL itself.
+  "pg_catalog",
+  "information_schema",
+  "pg_toast",
+  // Materialize - materialize.com/docs/sql/system-catalog/
+  "mz_catalog",
+  "mz_internal",
+  "mz_introspection",
+  // CockroachDB - cockroachlabs.com/docs/stable/system-catalogs enumerates exactly
+  // four schemas; the two below are the ones stock PostgreSQL does not also have.
+  "crdb_internal",
+  "pg_extension",
+  // TimescaleDB - the extension's own sql/pre_install/schemas.sql creates all seven.
+  // `_timescaledb_internal` is the one that floods: it holds every hypertable chunk.
+  "_timescaledb_catalog",
+  "_timescaledb_config",
+  "_timescaledb_functions",
+  "_timescaledb_internal",
+  "_timescaledb_cache",
+  "timescaledb_experimental",
+  "timescaledb_information",
+  // Apache Cloudberry - cloudberry.apache.org create-and-manage-schemas documents the
+  // first three. `pg_ext_aux` is not in that page but holds the PAX auxiliary tables
+  // (pg_pax_tables, pg_pax_fastsequence) on a live 2.1.0 instance, so it is here on
+  // measurement rather than on the doc's authority.
+  "gp_toolkit",
+  "pg_aoseg",
+  "pg_bitmapindex",
+  "pg_ext_aux",
+  // AlloyDB Omni - created by the google_ml_integration extension, which is enabled by
+  // default in Omni. Google's docs name the extension but never the schema; traced
+  // through pg_depend on a live 17.9 instance.
+  "google_ml",
+] as const;
+
+// Rendered once. Callers interpolate this into a `NOT IN (...)` clause.
+const SYSTEM_SCHEMA_LIST = SYSTEM_SCHEMAS.map((schema) => `'${schema}'`).join(", ");
+
 // Reusable CTE fragments (no trailing comma). Composed into the queries below;
 // kept single-sourced so the shared CTEs aren't duplicated across queries.
-// `mz_catalog`/`mz_internal` join the standard exclusion list everywhere it appears
-// in this file (schema, table stats, index stats): real PostgreSQL never has schemas
-// by those names, so excluding them is a no-op there, but Materialize's own system
-// catalog otherwise floods the object browser with dozens of internal relations
-// alongside the tables a user actually created.
 const CTE_TABLES_INFO = `
         tables_info AS MATERIALIZED (
           SELECT
@@ -109,7 +155,7 @@ const CTE_TABLES_INFO = `
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
           LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
-          WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')
+          WHERE t.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
           AND t.table_type = 'BASE TABLE'
         )`;
 
@@ -127,7 +173,7 @@ const CTE_COLUMNS_INFO = `
               ) ORDER BY c.ordinal_position
             ) FILTER (WHERE c.ordinal_position <= 100) as columns
           FROM information_schema.columns c
-          WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')
+          WHERE c.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
           GROUP BY c.table_schema, c.table_name
         )`;
 
@@ -142,6 +188,7 @@ const CTE_PK_INFO = `
             ON tc.constraint_name = kcu.constraint_name
             AND tc.table_schema = kcu.table_schema
           WHERE tc.constraint_type = 'PRIMARY KEY'
+          AND tc.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -166,6 +213,7 @@ const CTE_FK_INFO = `
             ON ccu.constraint_name = tc.constraint_name
             AND ccu.constraint_schema = tc.constraint_schema
           WHERE tc.constraint_type = 'FOREIGN KEY'
+          AND tc.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -189,7 +237,7 @@ const CTE_INDEX_INFO = `
           JOIN pg_class t ON t.oid = ix.indrelid
           JOIN pg_class i ON i.oid = ix.indexrelid
           JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')
+          WHERE n.nspname NOT IN (${SYSTEM_SCHEMA_LIST})
           GROUP BY n.nspname, t.relname
         )`;
 
@@ -290,6 +338,52 @@ function isMissingJsonAggError(error: unknown): boolean {
   return message.includes("json_agg") || message.includes("json_build_object");
 }
 
+// Replaces one named CTE's body, matching the closing parenthesis by depth rather
+// than by text, because the fallbacks above have already rewritten parts of this
+// SQL by the time this one runs and a literal match would no longer find it. Safe
+// for the CTE it is used on below, whose string literals contain no parentheses;
+// it is not a general SQL parser. Returns the SQL untouched when the CTE is absent,
+// which is how a query that never joined the FK catalog reports "not repairable"
+// instead of silently retrying something it did not change.
+function replaceCteBody(sql: string, cteName: string, body: string): string {
+  const header = new RegExp(`${cteName}\\s+AS\\s+(?:MATERIALIZED\\s+)?\\(`, "i");
+  const match = header.exec(sql);
+  if (!match) return sql;
+
+  const bodyStart = match.index + match[0].length;
+  let depth = 1;
+  let cursor = bodyStart;
+  while (cursor < sql.length && depth > 0) {
+    if (sql[cursor] === "(") depth++;
+    else if (sql[cursor] === ")") depth--;
+    cursor++;
+  }
+  return sql.slice(0, bodyStart) + body + sql.slice(cursor - 1);
+}
+
+// Materialize answers information_schema.table_constraints and key_column_usage but
+// has no constraint_column_usage, which is the only one of the three that names the
+// table a foreign key points AT - so the relationship is genuinely unknowable there,
+// while every other column in the same query is not. Emptying the CTE keeps the outer
+// LEFT JOIN and FULL OUTER JOIN valid and leaves foreignKeys as [], an absence, rather
+// than dropping the tables and columns that were readable all along.
+const EMPTY_FK_INFO_BODY = `
+          SELECT
+            NULL::text AS table_schema,
+            NULL::text AS table_name,
+            NULL::json AS foreign_keys
+          WHERE false
+        `;
+
+function withoutForeignKeyCatalog(sql: string): string {
+  return replaceCteBody(sql, "fk_info", EMPTY_FK_INFO_BODY);
+}
+
+function isMissingConstraintColumnUsageError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("constraint_column_usage");
+}
+
 // ============================================================================
 // Monitoring & maintenance SQL
 // ----------------------------------------------------------------------------
@@ -384,8 +478,8 @@ const OVERVIEW_SIZE_SQL = `
 // getOverview: user table and index counts across all user schemas.
 const OVERVIEW_COUNTS_SQL = `
         SELECT
-          (SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')) as table_count,
-          (SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')) as index_count
+          (SELECT count(*) FROM pg_tables WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})) as table_count,
+          (SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})) as index_count
       `;
 
 // getPerformanceMetrics: buffer cache hit ratio. NULL when there is nothing to
@@ -1161,6 +1255,7 @@ export class PostgresProvider extends SQLBaseProvider {
       { matches: isMaterializedKeywordSyntaxError, apply: withoutMaterializedHint },
       { matches: isMissingTotalRelationSizeError, apply: withoutTotalRelationSizeFn },
       { matches: isMissingJsonAggError, apply: withoutJsonAggFunctions },
+      { matches: isMissingConstraintColumnUsageError, apply: withoutForeignKeyCatalog },
     ];
     let currentSql = sql;
     for (;;) {
@@ -1738,9 +1833,7 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema
-        ? `WHERE schemaname = $1`
-        : `WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')`;
+      const whereClause = schema ? `WHERE schemaname = $1` : `WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
       const params = schema ? [schema] : [];
 
       const res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
@@ -1776,9 +1869,7 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema
-        ? `WHERE s.schemaname = $1`
-        : `WHERE s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast', 'mz_catalog', 'mz_internal')`;
+      const whereClause = schema ? `WHERE s.schemaname = $1` : `WHERE s.schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
       const params = schema ? [schema] : [];
 
       const res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);
