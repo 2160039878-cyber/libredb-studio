@@ -351,8 +351,8 @@ function defaultMockQuery(sql: string): Promise<{ rows: unknown[]; fields?: { na
     });
   }
 
-  // Schema CTE query: information_schema + table_type = 'base table'
-  if (normalized.includes("information_schema") && normalized.includes("table_type = 'base table'")) {
+  // Schema CTE query: information_schema + table_type in ('base table'
+  if (normalized.includes("information_schema") && normalized.includes("table_type in ('base table'")) {
     return Promise.resolve({
       rows: [
         {
@@ -1021,7 +1021,7 @@ describe("PostgresProvider", () => {
 
   describe("getSchemaList()", () => {
     // The fast path shares the tables/columns/pk CTE shape with getSchema(), so
-    // the default mock (information_schema + table_type = 'base table') applies.
+    // the default mock (information_schema + table_type in ('base table') applies.
     // What it must NOT do is populate indexes/foreignKeys — those are deferred
     // to getSchemaRelations() so a slow stats query can't block the table list.
     test("returns tables with columns and PKs but empty indexes/foreignKeys", async () => {
@@ -1062,7 +1062,7 @@ describe("PostgresProvider", () => {
     test("negative reltuples row_count is clamped to zero", async () => {
       // Never-analyzed tables report reltuples = -1; the UI must never show -1.
       mockQueryFn = (sql: string) => {
-        if (sql.toLowerCase().includes("table_type = 'base table'")) {
+        if (sql.toLowerCase().includes("table_type in ('base table'")) {
           return Promise.resolve({
             rows: [
               {
@@ -1089,7 +1089,7 @@ describe("PostgresProvider", () => {
 
     test("table with no columns yields an empty columns array (not a crash)", async () => {
       mockQueryFn = (sql: string) => {
-        if (sql.toLowerCase().includes("table_type = 'base table'")) {
+        if (sql.toLowerCase().includes("table_type in ('base table'")) {
           return Promise.resolve({
             rows: [
               {
@@ -1612,6 +1612,106 @@ describe("PostgresProvider", () => {
       expect(schema.length).toBe(2);
       expect(attempts.length).toBe(5);
       expect(countParens(attempts[4])).toEqual({ balanced: true });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Materialized views, and statistics panels on an engine that has no sizes
+  // --------------------------------------------------------------------------
+
+  describe("materialized views in the object browser", () => {
+    test("the schema query asks for materialized views as well as base tables", async () => {
+      // Materialize reports its materialized views through information_schema.tables
+      // with table_type = 'MATERIALIZED VIEW', and they are the object its users
+      // actually work with - a browser that lists only BASE TABLE hides the product.
+      // Measured no-op elsewhere: PostgreSQL 18.4, TimescaleDB, YugabyteDB, Cloudberry,
+      // AlloyDB Omni and CockroachDB never emit that table_type at all (PostgreSQL
+      // leaves materialized views out of information_schema.tables entirely).
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+      await provider.getSchemaList();
+
+      const tableQueries = seen.filter((sql) => sql.includes("tables_info AS MATERIALIZED ("));
+      expect(tableQueries.length).toBeGreaterThan(0);
+      for (const sql of tableQueries) {
+        expect(sql).toContain("'MATERIALIZED VIEW'");
+        // Still a positive list, not "everything that is not a view": a FOREIGN or
+        // SYSTEM VIEW row is not a table and must stay out.
+        expect(sql).toContain("'BASE TABLE'");
+        expect(sql).not.toContain("'SYSTEM VIEW'");
+      }
+    });
+  });
+
+  describe("statistics panels on an engine with no size functions", () => {
+    // Measured on Materialize v26.37.0: getTableStats() dies on pg_table_size and
+    // getIndexStats() on pg_stat_user_tables, so the Tables and Storage tabs printed
+    // an engine error where every neighbouring panel had already learned to say N/A.
+    // Same idiom getSlowQueries()/getActiveSessions() already use for a missing
+    // pg_stat_activity: an absence answers empty, it does not fail the panel.
+
+    test("getTableStats() answers empty when the size function does not exist", async () => {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("pg_table_size")) {
+          return Promise.reject(new Error('function "pg_table_size" does not exist'));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      expect(await provider.getTableStats()).toEqual([]);
+    });
+
+    test("getIndexStats() answers empty when the statistics catalog is absent", async () => {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("pg_stat_user_indexes") || sql.includes("pg_stat_user_tables")) {
+          return Promise.reject(new Error("unknown catalog item 'pg_stat_user_tables'"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      expect(await provider.getIndexStats()).toEqual([]);
+    });
+
+    test("getStorageStats() skips tablespaces when the size function does not exist", async () => {
+      // The last panel on the Storage tab still printed an engine error after the
+      // Tables tab had learned to say N/A. WAL was already guarded here; tablespaces
+      // were not, and Materialize has neither.
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("pg_tablespace")) {
+          return Promise.reject(new Error('function "pg_tablespace_size" does not exist'));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      // Not a throw, and not a fabricated tablespace either: WAL is the only thing
+      // this engine could answer, so it is the only thing reported.
+      const stats = await provider.getStorageStats();
+      expect(stats.every((s) => s.name !== "pg_default")).toBe(true);
+    });
+
+    test("a planner restriction still reaches the panel instead of reading as empty", async () => {
+      // Cloudberry's control case, and the reason the two above cannot just swallow
+      // every error: pg_stat_user_tables exists there and the catalog is readable -
+      // its MPP planner refuses this query's shape. "No rows" would misreport that as
+      // a database with no tables, so the engine's own words have to survive.
+      mockQueryFn = () => Promise.reject(new Error("query plan with multiple segworker groups is not supported"));
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      await expect(provider.getTableStats()).rejects.toThrow();
+      await expect(provider.getIndexStats()).rejects.toThrow();
     });
   });
 

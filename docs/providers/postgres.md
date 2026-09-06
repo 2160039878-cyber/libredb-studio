@@ -159,6 +159,38 @@ A statement that never joined the catalog a fallback repairs is *not* retried bl
 (`SCHEMA_LIST_SQL` has none), so the rejection is mapped and rethrown on the next attempt instead of
 looping on a statement nothing changed.
 
+### 3.1.1 What counts as a table
+
+`CTE_TABLES_INFO` filters `table_type IN ('BASE TABLE', 'MATERIALIZED VIEW')` — a positive list,
+not "anything that is not a view", so a `FOREIGN` or `SYSTEM VIEW` row still stays out.
+`MATERIALIZED VIEW` is on it for Materialize, which reports its materialized views through
+`information_schema.tables` under that type and whose users work with them rather than with base
+tables: listing only `BASE TABLE` hid the engine's central object while showing its plain tables.
+
+It is a measured no-op everywhere else. PostgreSQL leaves materialized views out of
+`information_schema.tables` altogether — its `table_type` is only `BASE TABLE`, `VIEW`, `FOREIGN` or
+`LOCAL TEMPORARY` — and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni and CockroachDB were each
+asked on a live instance and emit no such row (CockroachDB's third value is `SYSTEM VIEW`).
+
+### 3.1.2 An absent object is no rows, a refused query is an error
+
+`getTableStats()`, `getIndexStats()` and `getStorageStats()`'s tablespace read answer **no rows**
+when the engine says a `pg_` object they asked for is not there, instead of failing their panel.
+This is the rule `getSlowQueries()` and `getActiveSessions()` already follow for a missing
+`pg_stat_activity`, extended to the statistics surfaces that had not learned it: on Materialize the
+Tables and Storage tabs printed `function "pg_table_size" does not exist` where every neighbouring
+panel already said N/A.
+
+`namesAbsentPgObject()` requires **both** an absence phrase (`does not exist`,
+`unknown catalog item`, `unknown function`) **and** a `pg_`-prefixed name in the message, because
+the distinction it draws is load-bearing. Cloudberry answers
+`query plan with multiple segworker groups is not supported` for these same queries while
+`pg_stat_user_tables` exists and is perfectly readable — its MPP planner is refusing the query's
+shape. Reading that as an empty result would turn a planner restriction into a false claim that the
+database has no tables, so it names no `pg_` object, fails the predicate, and still reaches the
+panel with the engine's own words. Verified on a live instance in both directions: Materialize's
+seven monitoring tabs render with no engine error, Cloudberry's two still carry theirs.
+
 ### 3.1.1 The system-schema exclusion set
 
 `SYSTEM_SCHEMAS` ([postgres.ts](../../src/lib/db/providers/sql/postgres.ts)) is single-sourced and

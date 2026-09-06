@@ -3,7 +3,13 @@
  * Full PostgreSQL support with connection pooling
  */
 
-import { Pool, type PoolClient, type PoolConfig as PgPoolConfig, type QueryConfig } from "pg";
+import {
+  Pool,
+  type PoolClient,
+  type PoolConfig as PgPoolConfig,
+  type QueryConfig,
+  type QueryResult as PgQueryResult,
+} from "pg";
 import { SQLBaseProvider } from "./sql-base";
 import {
   type DatabaseConnection,
@@ -146,6 +152,14 @@ const SYSTEM_SCHEMA_LIST = SYSTEM_SCHEMAS.map((schema) => `'${schema}'`).join(",
 
 // Reusable CTE fragments (no trailing comma). Composed into the queries below;
 // kept single-sourced so the shared CTEs aren't duplicated across queries.
+// The table_type filter is a positive list, not "anything that is not a view".
+// `MATERIALIZED VIEW` is on it for Materialize, which reports its materialized views
+// through information_schema.tables under that type and whose users work with them
+// rather than with base tables - listing only BASE TABLE hid the product itself.
+// Measured no-op everywhere else: PostgreSQL leaves materialized views out of
+// information_schema.tables altogether (its table_type is only BASE TABLE, VIEW,
+// FOREIGN or LOCAL TEMPORARY), and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni
+// and CockroachDB were each checked on a live instance and emit no such row.
 const CTE_TABLES_INFO = `
         tables_info AS MATERIALIZED (
           SELECT
@@ -156,7 +170,7 @@ const CTE_TABLES_INFO = `
           FROM information_schema.tables t
           LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
           WHERE t.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
-          AND t.table_type = 'BASE TABLE'
+          AND t.table_type IN ('BASE TABLE', 'MATERIALIZED VIEW')
         )`;
 
 const CTE_COLUMNS_INFO = `
@@ -382,6 +396,20 @@ function withoutForeignKeyCatalog(sql: string): string {
 function isMissingConstraintColumnUsageError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return error.message.toLowerCase().includes("constraint_column_usage");
+}
+
+// True only when the engine says a pg_* object it was asked for is not there, which
+// is an absence the statistics panels can report as "no rows". Both halves matter:
+// Cloudberry answers "query plan with multiple segworker groups is not supported"
+// for the same queries while pg_stat_user_tables exists and is readable, and reading
+// that as an empty database would turn a planner restriction into a false claim that
+// the database has no tables. It names no pg_ object, so it still reaches the panel.
+const ABSENT_OBJECT_PHRASES = ["does not exist", "unknown catalog item", "unknown function"];
+
+function namesAbsentPgObject(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const message = error.message.toLowerCase();
+  return ABSENT_OBJECT_PHRASES.some((phrase) => message.includes(phrase)) && /\bpg_\w+/.test(message);
 }
 
 // ============================================================================
@@ -1836,7 +1864,15 @@ export class PostgresProvider extends SQLBaseProvider {
       const whereClause = schema ? `WHERE schemaname = $1` : `WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
       const params = schema ? [schema] : [];
 
-      const res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
+      // An engine with no size functions (Materialize) answers no rows rather than
+      // failing the panel, matching getSlowQueries()/getActiveSessions() above.
+      let res: PgQueryResult;
+      try {
+        res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
+      } catch (error) {
+        if (!namesAbsentPgObject(error)) throw error;
+        return [];
+      }
 
       return res.rows.map((r) => ({
         schemaName: r.schema_name,
@@ -1872,7 +1908,14 @@ export class PostgresProvider extends SQLBaseProvider {
       const whereClause = schema ? `WHERE s.schemaname = $1` : `WHERE s.schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
       const params = schema ? [schema] : [];
 
-      const res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);
+      // Same rule as getTableStats(): an absent statistics catalog is no rows.
+      let res: PgQueryResult;
+      try {
+        res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);
+      } catch (error) {
+        if (!namesAbsentPgObject(error)) throw error;
+        return [];
+      }
 
       return res.rows.map((r) => ({
         schemaName: r.schema_name,
@@ -1902,17 +1945,23 @@ export class PostgresProvider extends SQLBaseProvider {
     try {
       const results: StorageStats[] = [];
 
-      // Get tablespace info
-      const tsRes = await client.query(STORAGE_TABLESPACES_SQL);
+      // Get tablespace info. An engine with no pg_tablespace_size() (Materialize)
+      // contributes no tablespace rows rather than failing the panel - the same rule
+      // WAL below has always followed, and the one getTableStats() follows above.
+      try {
+        const tsRes = await client.query(STORAGE_TABLESPACES_SQL);
 
-      for (const row of tsRes.rows) {
-        results.push({
-          name: row.name,
-          location: row.location || "default",
-          size: row.size || "0 bytes",
-          sizeBytes: parseInt(row.size_bytes || "0"),
-          usagePercent: undefined, // Would need disk space info
-        });
+        for (const row of tsRes.rows) {
+          results.push({
+            name: row.name,
+            location: row.location || "default",
+            size: row.size || "0 bytes",
+            sizeBytes: parseInt(row.size_bytes || "0"),
+            usagePercent: undefined, // Would need disk space info
+          });
+        }
+      } catch (error) {
+        if (!namesAbsentPgObject(error)) throw error;
       }
 
       // Get WAL info (if superuser or has permissions)
