@@ -9,13 +9,20 @@ name: AWS AMI Build
 # `workflow_dispatch`, which is why every decision below lives in the preflight
 # job rather than in a release-only `if:` that a dispatch would walk straight
 # past.
+#
+# Until the listing is live, no machine path may build: the preflight job reads
+# `aws-marketplace` in distribution/channels.yaml and stands down unless its
+# status is `live`. A person who names a version in the dispatch input still
+# builds - that is how the AMI for the first submission gets made - so the
+# channel status is the switch, and flipping it to `live` is the whole change
+# needed to turn the release path on.
 on:
   release:
     types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release tag to ship - must exist on ghcr.io/libredb/libredb-studio (e.g. 0.14.0). Leave empty to use package.json.'
+        description: 'Release tag to ship - must exist on ghcr.io/libredb/libredb-studio (e.g. 0.14.0). Leave empty to use package.json; while the AWS channel is not live in distribution/channels.yaml a version is REQUIRED, an empty run stands down.'
         required: false
         type: string
 
@@ -67,6 +74,27 @@ jobs:
             if [ "$explicit" = yes ]; then echo "::error::$1"; exit 1; fi
             stand_down "$1"
           }
+
+          # The listing gate. `aws-marketplace` in distribution/channels.yaml is
+          # the single source of truth for whether this product is on sale, and
+          # nothing automatic may register a marketplace AMI before it is: a
+          # release run, or the chained dispatch described above, stands down
+          # while the status is anything but `live`. Read with awk rather than
+          # a yaml parser so the gate needs no dependency install; the block is
+          # two-space indented and its keys four, so the next `  - id:` ends it.
+          CHANNEL_STATUS=$(awk '
+            $0 == "  - id: aws-marketplace" { found = 1; next }
+            found && /^  - id: / { exit }
+            found && /^    status: / { print $2; exit }
+          ' "$GITHUB_WORKSPACE/distribution/channels.yaml")
+          if [ "$CHANNEL_STATUS" != live ]; then
+            # Not `refuse`: a person who named a version is building the AMI the
+            # submission itself needs, which is exactly the pre-live case.
+            if [ "$explicit" = no ]; then
+              stand_down "aws-marketplace is '${CHANNEL_STATUS:-absent}' in distribution/channels.yaml, not live (run this workflow by hand with a version to build anyway)"
+            fi
+            echo "::notice::aws-marketplace is '${CHANNEL_STATUS:-absent}' in distribution/channels.yaml - building because a version was named explicitly"
+          fi
 
           # Chart releases (libredb-studio-<chart version>) emit release:published
           # too and are not product releases. npm-publish.yml and

@@ -30,10 +30,13 @@ keep in sync.
 ## Build
 
 Through the **AWS AMI Build** workflow: Actions -> AWS AMI Build -> Run
-workflow, with the version, or empty to use the `package.json` version at the
-ref. It resolves the tag to a digest, waits for the image if the push is still
-in flight, assumes the OIDC build role and prints the AMI ID, the base image and
-the next portal steps in the job summary.
+workflow, **with the version** - while the listing is not live, naming it is
+what marks the run as a person's rather than a machine's (the listing gate
+below), so an empty run stands down. Once the channel is live, empty falls back
+to the `package.json` version at the ref. The run resolves the tag to a digest,
+waits for the image if the push is still in flight, assumes the OIDC build role
+and prints the AMI ID, the base image and the next portal steps in the job
+summary.
 
 The workflow also declares `release: published`, but that trigger fires only
 when a human publishes a draft by hand: `release-artifacts.yml` publishes with
@@ -55,6 +58,15 @@ these three repository variables are set:
 `AWS_AMI_BUILD_ROLE_ARN` (the OIDC role Packer assumes) and
 `AWS_AMI_INGESTION_ROLE_ARN` (the role AWS assumes to read the AMI, echoed into
 the summary for the portal).
+
+Before any of that, it checks whether the product is on sale at all.
+`aws-marketplace` in `distribution/channels.yaml` carries the status of the
+listing, and while it is anything but `live` every machine path - a published
+release, the chained dispatch above - stands down quietly, so a release can
+never register a marketplace AMI for a product nobody can buy. A dispatch that
+NAMES a version builds regardless, because that is how the AMI the first
+submission needs gets made. Flipping the status to `live` is the whole switch:
+there is nothing to edit in the workflow when the listing goes public.
 
 Locally, against the seller account:
 
