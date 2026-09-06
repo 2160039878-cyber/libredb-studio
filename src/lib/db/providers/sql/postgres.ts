@@ -60,7 +60,7 @@ interface PgStatActivityRow {
 interface SchemaRow {
   table_schema: string;
   table_name: string;
-  row_count: string;
+  row_count: string | null;
   total_size: string;
   pk_columns: string[];
   columns?: Array<{ name: string; type: string; nullable: boolean; defaultValue?: string | null }>;
@@ -137,6 +137,32 @@ const SYSTEM_SCHEMAS = [
   "pg_ext_aux",
 ] as const;
 
+/**
+ * What `pg_class.reltuples` actually said, or nothing.
+ *
+ * It is an estimate, and PostgreSQL 14+ writes **-1** for a relation nothing has
+ * vacuumed or analysed yet: "I have not counted this", which is not "this has no rows".
+ * NULL arrives the same way when the pg_class join matched nothing at all. Both become
+ * absence, and `TableSchema.rowCount` is optional so the badge simply is not drawn -
+ * the object browser already gates on that.
+ *
+ * Measured on stock PostgreSQL 18.4: two tables holding 5000 and 1200 rows both read -1
+ * until ANALYZE ran, and every one of them displayed "0 rows". A freshly restored dump
+ * is exactly that state. `src/lib/agent/schema-stats.ts` already reads -1 as absence for
+ * the agent's grounding read and names the reason - "the standing defect class in this
+ * repository is claiming a precision you do not have" - and this is the same read for a
+ * person instead of a model.
+ *
+ * A genuine 0 is kept, because an empty table is a real measurement. On a server old
+ * enough to write 0 rather than -1 the two are indistinguishable and nothing here can
+ * tell them apart, the same limit schema-stats.ts documents.
+ */
+function estimatedRowCount(raw: string | null | undefined): number | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  const parsed = parseInt(raw);
+  return Number.isNaN(parsed) || parsed < 0 ? undefined : parsed;
+}
+
 // Rendered once. Callers interpolate this into a `NOT IN (...)` clause.
 const SYSTEM_SCHEMA_LIST = SYSTEM_SCHEMAS.map((schema) => `'${schema}'`).join(", ");
 
@@ -181,7 +207,7 @@ const CTE_TABLES_INFO = `
           SELECT
             t.table_schema,
             t.table_name,
-            COALESCE(c.reltuples::bigint, 0) as row_count,
+            c.reltuples::bigint as row_count,
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
           LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
@@ -1341,7 +1367,7 @@ export class PostgresProvider extends SQLBaseProvider {
         const schemaName = row.table_schema;
         const tableName = row.table_name;
         const displayName = schemaName === "public" ? tableName : `${schemaName}.${tableName}`;
-        const rowCount = Math.max(0, parseInt(row.row_count || "0"));
+        const rowCount = estimatedRowCount(row.row_count);
         const sizeBytes = parseInt(row.total_size || "0");
         const pkColumns: string[] = row.pk_columns || [];
 
@@ -1409,7 +1435,7 @@ export class PostgresProvider extends SQLBaseProvider {
         }));
         return {
           name: displayName,
-          rowCount: Math.max(0, parseInt(row.row_count || "0")),
+          rowCount: estimatedRowCount(row.row_count),
           size: formatBytes(parseInt(row.total_size || "0")),
           columns,
           indexes: [],

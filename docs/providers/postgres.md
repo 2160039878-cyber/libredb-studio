@@ -162,6 +162,27 @@ A statement that never joined the catalog a fallback repairs is *not* retried bl
 (`SCHEMA_LIST_SQL` has none), so the rejection is mapped and rethrown on the next attempt instead of
 looping on a statement nothing changed.
 
+### 3.1.0 A row count nobody counted
+
+`tables_info` reads `pg_class.reltuples`, which is an **estimate**, and PostgreSQL 14+ writes
+**-1** there for a relation nothing has vacuumed or analysed yet. That is "I have not counted
+this", not "this has no rows". `estimatedRowCount()` maps it — and a NULL from a pg_class join
+that matched nothing — to `undefined`; `TableSchema.rowCount` is optional and both
+[TableItem.tsx](../../src/components/schema-explorer/TableItem.tsx) and `DatabaseDocs.tsx`
+already gate on that, so no badge is drawn rather than a number nobody produced.
+
+A genuine `0` is kept, because an empty table is a real measurement. On a server old enough to
+write `0` instead of `-1` the two cannot be told apart, the same limit
+[schema-stats.ts](../../src/lib/agent/schema-stats.ts) documents for the agent's grounding read.
+
+This mattered more than it looks. Measured on stock PostgreSQL 18.4, two tables holding 5000 and
+1200 rows both answered -1 until `ANALYZE` ran, and the browser showed **0 rows** for both — a
+freshly restored dump is exactly that state, so the first thing a new user saw was every table
+claiming to be empty. Materialize answers -1 for every relation always. The clamp that produced
+this was `Math.max(0, ...)`, and a test asserted it: "negative reltuples row_count is clamped to
+zero". Its stated concern was right, the UI must never show -1; its conclusion swapped one wrong
+number for a more convincing one.
+
 ### 3.1.1 What counts as a table
 
 `CTE_TABLES_INFO` filters `table_type IN ('BASE TABLE', 'MATERIALIZED VIEW')` — a positive list,

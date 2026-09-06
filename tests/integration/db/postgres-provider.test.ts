@@ -1060,8 +1060,10 @@ describe("PostgresProvider", () => {
       expect(schema.find((t) => t.name === "users")).toBeDefined();
     });
 
-    test("negative reltuples row_count is clamped to zero", async () => {
-      // Never-analyzed tables report reltuples = -1; the UI must never show -1.
+    test("negative reltuples row_count is reported as absent, not as zero", async () => {
+      // Never-analysed tables report reltuples = -1 and the UI must never show -1 - but
+      // clamping it to 0 traded one wrong number for another, and 0 is the more
+      // convincing lie because it looks like a reading. Absence draws no badge at all.
       mockQueryFn = (sql: string) => {
         if (sql.toLowerCase().includes("table_type in ('base table'")) {
           return Promise.resolve({
@@ -1085,7 +1087,7 @@ describe("PostgresProvider", () => {
       await provider.connect();
       const schema = await provider.getSchemaList();
 
-      expect(schema[0].rowCount).toBe(0);
+      expect(schema[0].rowCount).toBeUndefined();
     });
 
     test("table with no columns yields an empty columns array (not a crash)", async () => {
@@ -1821,6 +1823,100 @@ describe("PostgresProvider", () => {
 
       await expect(provider.getTableStats()).rejects.toThrow(/segworker/);
       await expect(provider.getIndexStats()).rejects.toThrow(/segworker/);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Row counts an engine has not actually counted
+  // --------------------------------------------------------------------------
+
+  describe("uncounted row estimates", () => {
+    // pg_class.reltuples is -1 on PostgreSQL 14+ for a relation nothing has vacuumed
+    // or analysed yet. Measured on a stock PostgreSQL 18.4: two tables holding 5000
+    // and 1200 rows both answered -1 until ANALYZE ran, and the object browser showed
+    // "0 rows" for both. A freshly restored dump is exactly that state, so the first
+    // thing a new user sees is every table claiming to be empty.
+    //
+    // src/lib/agent/schema-stats.ts already reads -1 as absence and says why: "the
+    // standing defect class in this repository is claiming a precision you do not
+    // have". The object browser is the same read for a human instead of a model.
+    function schemaWithRowCount(rowCount: string | null) {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("tables_info AS MATERIALIZED (")) {
+          return Promise.resolve({
+            rows: [
+              {
+                table_schema: "public",
+                table_name: "orders",
+                row_count: rowCount,
+                total_size: "81920",
+                columns: [],
+                pk_columns: [],
+                foreign_keys: [],
+                indexes: [],
+              },
+            ],
+            fields: [],
+            rowCount: 1,
+          });
+        }
+        return defaultMockQuery(sql);
+      };
+    }
+
+    test("getSchema() leaves the count absent when the engine has not counted", async () => {
+      schemaWithRowCount("-1");
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const [table] = await provider.getSchema();
+      expect(table.rowCount).toBeUndefined();
+    });
+
+    test("getSchemaList() leaves it absent too", async () => {
+      schemaWithRowCount("-1");
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const [table] = await provider.getSchemaList();
+      expect(table.rowCount).toBeUndefined();
+    });
+
+    test("a table with no pg_class row is absent, not zero", async () => {
+      // The CTE used to COALESCE a missing join to 0, which is the same fabrication
+      // wearing a different hat: "no row here" is not "this table has no rows".
+      schemaWithRowCount(null);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const [table] = await provider.getSchema();
+      expect(table.rowCount).toBeUndefined();
+    });
+
+    test("a real zero survives, because an empty table is a measurement", async () => {
+      // The control. If absence swallowed 0 as well, this fix would trade one wrong
+      // answer for another and the badge would vanish from every genuinely empty table.
+      schemaWithRowCount("0");
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const [table] = await provider.getSchema();
+      expect(table.rowCount).toBe(0);
+    });
+
+    test("the query no longer asks the database to invent a zero", async () => {
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+
+      const schemaQuery = seen.find((sql) => sql.includes("tables_info AS MATERIALIZED ("));
+      expect(schemaQuery).toBeDefined();
+      expect(schemaQuery).not.toContain("COALESCE(c.reltuples");
     });
   });
 
