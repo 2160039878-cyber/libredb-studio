@@ -20,6 +20,22 @@ describe("PanelUnavailable", () => {
     expect(screen.getByTestId("panel-unavailable").textContent).not.toContain("could not answer");
   });
 
+  // The same distinction, in each engine's own words. PanelUnavailable is shared by all
+  // six monitoring tabs, so a rule that only recognises PostgreSQL's phrasing renders
+  // every other engine's genuine absence as a fault. Every message below was taken from
+  // a real engine, several of them recorded in compatibility.ts.
+  test.each([
+    ["Materialize", 'function "pg_table_size" does not exist'],
+    ["CockroachDB", "unknown function: pg_size_pretty()"],
+    ["StarRocks", "Unknown table 'information_schema.PROCESSLIST'"],
+    ["ClickHouse", "Unknown table expression identifier 'system.parts'"],
+    ["Cassandra", "unconfigured table system_views.clients"],
+  ])("%s: an object that is not there reads as a limit", (_engine, message) => {
+    render(<PanelUnavailable message={message} />);
+
+    expect(screen.getByTestId("panel-unavailable").textContent).toContain("does not publish");
+  });
+
   test("a refused statement still reads as a fault", () => {
     // Cloudberry: pg_stat_user_tables is there and readable, its MPP planner refused
     // this query's shape. Another statement could succeed, so this is not a limit.

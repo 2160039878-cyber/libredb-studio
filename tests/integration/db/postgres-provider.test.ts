@@ -1513,6 +1513,31 @@ describe("PostgresProvider", () => {
       expect(seen.some((sql) => sql.includes("'google_ml'"))).toBe(false);
     });
 
+    test("an engine without pg_depend still gets a real count, not a zero", async () => {
+      // The counts query carries the ownership clause too, but it does not go through
+      // the object browser's fallback chain, so an engine that cannot evaluate
+      // pg_depend used to land in getOverview's catch and report 0 tables - the same
+      // fabricated measurement this file spends its comments arguing against.
+      let attempts = 0;
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("as table_count")) {
+          attempts++;
+          if (sql.includes("pg_depend")) {
+            return Promise.reject(new Error('relation "pg_depend" does not exist'));
+          }
+          return Promise.resolve({ rows: [{ table_count: "42", index_count: "7" }], fields: [], rowCount: 1 });
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const overview = await provider.getOverview();
+      expect(attempts).toBe(2);
+      expect(overview.tableCount).toBe(42);
+      expect(overview.indexCount).toBe(7);
+    });
+
     test("the overview counts a table the same way the object browser does", async () => {
       // These are the two readers that disagreed on CockroachDB, and adding
       // materialized views to the browser split them again on Materialize: the browser
@@ -1657,6 +1682,30 @@ describe("PostgresProvider", () => {
       expect(rewritten).toContain("LEFT JOIN fk_info fk");
       expect(rewritten).toContain("ORDER BY ti.table_schema");
       expect(countParens(rewritten)).toEqual({ balanced: true });
+    });
+
+    test("the ownership subquery stays strippable, which means bracket-free", async () => {
+      // withoutExtensionOwnershipTest() finds the clause with a regex that stops at the
+      // first ")", so a bracket anywhere inside the subquery would leave half of it
+      // behind and produce SQL no engine will parse - silently, on exactly the engines
+      // nobody here can test. The subquery is written bracket-free on purpose; this
+      // fails the moment someone forgets why.
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+
+      const query = seen.find((sql) => sql.includes("pg_depend"));
+      expect(query).toBeDefined();
+      const clause = /NOT IN \(SELECT n\.nspname FROM pg_namespace n JOIN pg_depend[^)]*\)/.exec(query as string);
+      expect(clause).not.toBeNull();
+      // The match must end at the clause's own closing bracket, so what it captured
+      // has to contain the whole subquery - pg_extension is its last table.
+      expect((clause as RegExpExecArray)[0]).toContain("pg_extension");
     });
 
     test("an engine without pg_depend falls back to the fixed schema list", async () => {
@@ -1823,6 +1872,59 @@ describe("PostgresProvider", () => {
 
       await expect(provider.getTableStats()).rejects.toThrow(/segworker/);
       await expect(provider.getIndexStats()).rejects.toThrow(/segworker/);
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // A relation that disappears while the schema is being read
+  // --------------------------------------------------------------------------
+
+  describe("concurrent DDL during a schema read", () => {
+    // tables_info lists relations from information_schema and then resolves each name
+    // to a pg_class row. A bare ::regclass cast RAISES when the name no longer resolves,
+    // so a table dropped between those two steps failed the whole read. Reproduced on
+    // PostgreSQL 18.4: with tables being created and dropped alongside, 102 of 400 runs
+    // died with 'relation "public.materialized_daily_totals_396" does not exist'.
+    //
+    // to_regclass() answers NULL instead of raising, so the row survives with no
+    // pg_class match and its count reads as absent - which it genuinely is.
+
+    test("the schema query resolves names without raising", async () => {
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+
+      const query = seen.find((sql) => sql.includes("tables_info AS MATERIALIZED ("));
+      expect(query).toBeDefined();
+      expect(query).toContain("to_regclass(");
+    });
+
+    test("an engine without to_regclass falls back to the cast and still reads", async () => {
+      // Measured: Materialize has no to_regclass, while PostgreSQL, TimescaleDB,
+      // YugabyteDB, Cloudberry, AlloyDB Omni and CockroachDB all do. The engine this
+      // whole fallback chain exists for must not lose its object browser to the fix.
+      const attempts: string[] = [];
+      mockQueryFn = (sql: string) => {
+        attempts.push(sql);
+        if (sql.includes("to_regclass(")) {
+          return Promise.reject(new Error('function "to_regclass" does not exist'));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+      expect(attempts.length).toBe(2);
+      expect(attempts[1]).not.toContain("to_regclass(");
+      expect(attempts[1]).toContain("::regclass");
+      expect(countParens(attempts[1])).toEqual({ balanced: true });
     });
   });
 

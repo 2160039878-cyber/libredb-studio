@@ -162,6 +162,27 @@ A statement that never joined the catalog a fallback repairs is *not* retried bl
 (`SCHEMA_LIST_SQL` has none), so the rejection is mapped and rethrown on the next attempt instead of
 looping on a statement nothing changed.
 
+### 3.0.1 Resolving a name that may vanish mid-read
+
+`tables_info` lists relations from `information_schema` and then resolves each name to a
+`pg_class` row. A bare `::regclass` cast **raises** when the name no longer resolves, so a
+table dropped between those two steps failed the entire read. Reproduced on PostgreSQL
+18.4 with concurrent `CREATE`/`DROP` alongside: **102 of 400 runs** died with
+`relation "public.materialized_daily_totals_396" does not exist`. `to_regclass()` answers
+`NULL` instead, the row survives with no `pg_class` match, and its count reads as absent —
+which it is. Same harness after the change: **400 of 400 succeeded**.
+
+Materialize has no `to_regclass`, so it retries with the cast through
+`withoutToRegclass()` and behaves as it did before. PostgreSQL, TimescaleDB, YugabyteDB,
+Cloudberry, AlloyDB Omni and CockroachDB were each asked on a live instance and all have it.
+
+**What this costs, measured:** a PostgreSQL schema read is still **one** round trip.
+A Materialize one is **six** — it walks the whole chain (`MATERIALIZED` hint,
+`pg_total_relation_size`, `json_agg`, `constraint_column_usage`, `to_regclass`) before it
+lands on a statement that runs. Each failed attempt is a parse or plan error rather than
+work, and the chain is error-driven so it cannot be pre-sorted, but on a remote instance
+those round trips are latency the object browser pays on every refresh.
+
 ### 3.1.0 A row count nobody counted
 
 `tables_info` reads `pg_class.reltuples`, which is an **estimate**, and PostgreSQL 14+ writes

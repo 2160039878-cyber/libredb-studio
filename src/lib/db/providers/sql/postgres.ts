@@ -210,7 +210,7 @@ const CTE_TABLES_INFO = `
             c.reltuples::bigint as row_count,
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
-          LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
+          LEFT JOIN pg_class c ON c.oid = to_regclass(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))
           WHERE ${schemaExclusion("t.table_schema")}
           AND t.table_type IN (${USER_TABLE_TYPES})
         )`;
@@ -456,6 +456,28 @@ function isMissingConstraintColumnUsageError(error: unknown): boolean {
 // on before ownership was asked at all.
 function withoutExtensionOwnershipTest(sql: string): string {
   return sql.replace(/\s+AND\s+[\w.]+ NOT IN \(SELECT n\.nspname FROM pg_namespace n JOIN pg_depend[^)]*\)/g, "");
+}
+
+// tables_info lists relations from information_schema and then resolves each name to a
+// pg_class row. A bare ::regclass cast RAISES when the name no longer resolves, so a
+// table dropped between those two steps killed the whole read - reproduced on
+// PostgreSQL 18.4, where 102 of 400 runs died under concurrent CREATE/DROP.
+// to_regclass() answers NULL instead, and the row survives with its count absent.
+//
+// Measured: PostgreSQL, TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni and
+// CockroachDB all have to_regclass. Materialize does not, and it is the engine this
+// chain exists for, so it retries with the cast it had before - back to raising on a
+// concurrent drop, which is what it did all along.
+function withoutToRegclass(sql: string): string {
+  return sql.replace(
+    /to_regclass\((quote_ident\(t\.table_schema\) \|\| '\.' \|\| quote_ident\(t\.table_name\))\)/g,
+    "($1)::regclass",
+  );
+}
+
+function isMissingToRegclassError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message.toLowerCase().includes("to_regclass");
 }
 
 function isMissingExtensionCatalogError(error: unknown): boolean {
@@ -1338,6 +1360,7 @@ export class PostgresProvider extends SQLBaseProvider {
       { matches: isMissingJsonAggError, apply: withoutJsonAggFunctions },
       { matches: isMissingConstraintColumnUsageError, apply: withoutForeignKeyCatalog },
       { matches: isMissingExtensionCatalogError, apply: withoutExtensionOwnershipTest },
+      { matches: isMissingToRegclassError, apply: withoutToRegclass },
     ];
     let currentSql = sql;
     for (;;) {
@@ -1714,7 +1737,11 @@ export class PostgresProvider extends SQLBaseProvider {
       let tableCount = 0;
       let indexCount = 0;
       try {
-        const countRes = await client.query(OVERVIEW_COUNTS_SQL);
+        // Through the same chain the object browser uses, not a bare query: this one
+        // also carries the ownership clause, and an engine that cannot evaluate
+        // pg_depend must drop it and answer rather than fall into the catch below,
+        // which would report 0 tables - a measurement nobody made.
+        const countRes = await this.queryWithMaterializedFallback(client, OVERVIEW_COUNTS_SQL);
         tableCount = parseInt(countRes.rows[0].table_count || "0");
         indexCount = parseInt(countRes.rows[0].index_count || "0");
       } catch {
