@@ -92,6 +92,22 @@ const NAMED_CITATIONS = [
       "buildTLSAttributes",
     ],
   },
+  {
+    doc: "docs/providers/mongodb.md",
+    source: "src/lib/db/providers/document/mongodb.ts",
+    methods: [
+      "getCapabilities",
+      "getLabels",
+      "validate",
+      "buildConnectionString",
+      "buildTLSOptions",
+      "query",
+      "parseQuery",
+      "serializeDocument",
+      "getSchema",
+      "runMaintenance",
+    ],
+  },
 ] as const;
 
 const SEARCH_DOCS = ["docs/providers/elasticsearch.md", "docs/providers/opensearch.md"] as const;
