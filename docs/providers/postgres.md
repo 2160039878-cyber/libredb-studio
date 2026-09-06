@@ -136,9 +136,12 @@ recovers real object-browser data on four independent gaps instead of failing ou
    (verified: they return the identical shape over the wire — `pg` parses both OIDs into plain JS
    values). `withoutJsonAggFunctions()` swaps the function names.
 4. **`information_schema.constraint_column_usage`.** Materialize answers `table_constraints` and
-   `key_column_usage` but not this one, and it is the only one of the three that names the table a
-   foreign key points *at* — so the relationship is genuinely unknowable there while every other
-   column in the same query is not. `withoutForeignKeyCatalog()` empties the `fk_info` CTE rather
+   `key_column_usage` but does not implement this one: its catalog ships fourteen
+   `information_schema` views and that is not among them, at HEAD as well as at the probed release,
+   so it is not a version gap that will close. Worth knowing what the fallback is and is not buying:
+   Materialize has no primary keys or foreign keys at all — `CREATE TABLE` refuses both — so those
+   columns would come back empty even with the view present. The fallback exists because the query
+   *fails* without it, not because it recovers data. `withoutForeignKeyCatalog()` empties the `fk_info` CTE rather
    than dropping it, which keeps the outer `LEFT JOIN`/`FULL OUTER JOIN` valid and leaves
    `foreignKeys` as `[]`. It matches the closing parenthesis by depth, not by text, because the
    three fallbacks above have already rewritten parts of the statement by the time it runs.
