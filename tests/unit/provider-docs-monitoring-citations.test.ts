@@ -229,6 +229,21 @@ describe("provider docs rewritten this round: code cited by name, whole file", (
   });
 });
 
+const TOP_LEVEL_NAMED_CITATION_DOCS = [
+  "docs/AGENT.md",
+  "docs/FEATURES.md",
+  "docs/ADDING_A_PROVIDER.md",
+  "docs/SECURITY.md",
+] as const;
+
+describe("top-level docs: code cited by name, whole file", () => {
+  for (const doc of TOP_LEVEL_NAMED_CITATION_DOCS) {
+    test(`${doc} cites no TypeScript line number anywhere`, () => {
+      expect(read(doc)).not.toMatch(/\.tsx?:\d/);
+    });
+  }
+});
+
 /**
  * A quoted VALUE rots exactly the way a line number does, and nothing above measures it.
  *
