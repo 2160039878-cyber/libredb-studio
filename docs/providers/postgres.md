@@ -172,24 +172,34 @@ It is a measured no-op everywhere else. PostgreSQL leaves materialized views out
 `LOCAL TEMPORARY` — and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni and CockroachDB were each
 asked on a live instance and emit no such row (CockroachDB's third value is `SYSTEM VIEW`).
 
-### 3.1.2 An absent object is no rows, a refused query is an error
+### 3.1.2 Two kinds of absence, and why neither is an empty array
 
-`getTableStats()`, `getIndexStats()` and `getStorageStats()`'s tablespace read answer **no rows**
-when the engine says a `pg_` object they asked for is not there, instead of failing their panel.
-This is the rule `getSlowQueries()` and `getActiveSessions()` already follow for a missing
-`pg_stat_activity`, extended to the statistics surfaces that had not learned it: on Materialize the
-Tables and Storage tabs printed `function "pg_table_size" does not exist` where every neighbouring
-panel already said N/A.
+`getTableStats()`, `getIndexStats()` and `getStorageStats()`'s tablespace read **reject**
+when the engine says the object is not there. They do not answer `[]`. The `MonitoringData`
+contract ([types.ts](../../src/lib/db/types.ts)) is explicit that these are different facts:
+a rejected read leaves its panel absent and records the engine's own sentence under
+`errors`, while an empty array claims the engine answered "nothing" — a measurement it
+never made, and one that throws away the sentence saying why.
 
-`namesAbsentPgObject()` requires **both** an absence phrase (`does not exist`,
-`unknown catalog item`, `unknown function`) **and** a `pg_`-prefixed name in the message, because
-the distinction it draws is load-bearing. Cloudberry answers
-`query plan with multiple segworker groups is not supported` for these same queries while
-`pg_stat_user_tables` exists and is perfectly readable — its MPP planner is refusing the query's
-shape. Reading that as an empty result would turn a planner restriction into a false claim that the
-database has no tables, so it names no `pg_` object, fails the predicate, and still reaches the
-panel with the engine's own words. Verified on a live instance in both directions: Materialize's
-seven monitoring tabs render with no engine error, Cloudberry's two still carry theirs.
+The distinction a reader needs is then drawn where the sentence is rendered.
+`describesAbsentObject()` ([monitoring-absence.ts](../../src/lib/monitoring-absence.ts))
+asks whether the message names a `pg_`-prefixed object that is not there, and
+`PanelUnavailable` picks its headline from the answer:
+
+- **"This engine does not publish this."** — Materialize has no `pg_table_size()`, no
+  `pg_stat_user_tables` and no `pg_tablespace_size()`. Nothing is wrong and nothing the
+  user does will change it. Three of its panels land here.
+- **"This database could not answer this panel."** — Apache Cloudberry answers
+  `query plan with multiple segworker groups is not supported` for the same queries while
+  `pg_stat_user_tables` exists there and is readable. Its MPP planner is refusing this
+  query's *shape*, so a different statement could still succeed; that is worth attention
+  in a way the first is not. Two of its panels land here.
+
+The engine's sentence is shown verbatim under either headline, so no reason is lost.
+Both halves of the predicate are load-bearing: without the phrase any message naming a
+catalog would qualify, and without the `pg_` name Cloudberry's restriction would be
+flattened into a settled fact the next time its wording contains "does not exist".
+Verified in the browser in both directions on live instances.
 
 ### 3.1.1 The system-schema exclusion set
 
@@ -208,14 +218,32 @@ directions because the two readers use different catalogs:
   TimescaleDB where 2 were the user's (34 hypertable chunks in `_timescaledb_internal`, 22 in
   `_timescaledb_catalog`, 3 in `_timescaledb_cache`), 10 on AlloyDB Omni (`google_ml`) and 4 on
   Apache Cloudberry (`pg_ext_aux`).
-- **`OVERVIEW_COUNTS_SQL`** counts `pg_tables` directly, which has no `table_type` column to filter
-  on. On CockroachDB that answered 98 for the same 2 tables — 93 `crdb_internal`, 3 `pg_extension` —
-  so the Monitoring overview and the Explorer badge disagreed inside one app.
+- **`OVERVIEW_COUNTS_SQL`** counted `pg_tables` directly, which has no `table_type` column to
+  filter on. On CockroachDB that answered 98 for the same 2 tables — 93 `crdb_internal`, 3
+  `pg_extension` — so the Monitoring overview and the Explorer badge disagreed inside one app.
+  It now counts `information_schema.tables` through the same `USER_TABLE_TYPES` list the browser
+  uses, because the two disagreed a second time once materialized views joined the browser
+  (4 against 3 on Materialize). One definition of "a table", or they drift apart on the next
+  engine. The index count still reads `pg_indexes`, which has no equivalent second reader.
 
 Every CTE in the schema queries carries the filter, not just some: `pk_info` and `fk_info` were
 missing it while `tables_info`, `columns_info` and `index_info` had it, which let
 `getSchemaRelations()` keep listing `_timescaledb_catalog` and `google_ml` relations through the FK
 side of its `FULL OUTER JOIN` after the browser had stopped showing them.
+
+Extension-created schemas are excluded by **ownership**, not by name. A hardcoded
+`google_ml` would have hidden a real schema from anyone who happened to name one that -
+it is the only entry of this kind a user could plausibly choose - so `pg_depend` is asked
+the question the name was standing in for. It answers better too: on a live AlloyDB Omni
+it returns `google_ml` **and** `ai`, which the name list had missed, and a user's own
+schema is never extension-owned so it always survives. Measured accepted on all seven
+engines, PostgreSQL included, where it correctly returns nothing; the driver serves
+engines nobody here has run, so an engine without `pg_depend` or `pg_extension` drops the
+clause through `withoutExtensionOwnershipTest()` and keeps the fixed list.
+
+The fixed list stays for schemas the *engine itself* builds in, which are not
+extension-owned: measured, CockroachDB's `crdb_internal` and Cloudberry's `pg_ext_aux`
+return nothing from `pg_depend`.
 
 Citations, by engine: Materialize's
 [system catalog](https://materialize.com/docs/sql/system-catalog/) (`mz_catalog`, `mz_internal`,

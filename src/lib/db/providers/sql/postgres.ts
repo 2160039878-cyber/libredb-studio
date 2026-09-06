@@ -3,13 +3,7 @@
  * Full PostgreSQL support with connection pooling
  */
 
-import {
-  Pool,
-  type PoolClient,
-  type PoolConfig as PgPoolConfig,
-  type QueryConfig,
-  type QueryResult as PgQueryResult,
-} from "pg";
+import { Pool, type PoolClient, type PoolConfig as PgPoolConfig, type QueryConfig } from "pg";
 import { SQLBaseProvider } from "./sql-base";
 import {
   type DatabaseConnection,
@@ -141,14 +135,36 @@ const SYSTEM_SCHEMAS = [
   "pg_aoseg",
   "pg_bitmapindex",
   "pg_ext_aux",
-  // AlloyDB Omni - created by the google_ml_integration extension, which is enabled by
-  // default in Omni. Google's docs name the extension but never the schema; traced
-  // through pg_depend on a live 17.9 instance.
-  "google_ml",
 ] as const;
 
 // Rendered once. Callers interpolate this into a `NOT IN (...)` clause.
 const SYSTEM_SCHEMA_LIST = SYSTEM_SCHEMAS.map((schema) => `'${schema}'`).join(", ");
+
+// AlloyDB Omni is deliberately absent from the list above. Its google_ml schema is
+// created by an extension rather than built into the engine, and "google_ml" is the
+// one name of this kind a user could plausibly choose for a schema of their own -
+// hiding it by name would make their tables vanish with no explanation. Ownership is
+// the question the name was standing in for, and pg_depend answers it directly and
+// better: on a live AlloyDB Omni it returns google_ml AND ai, which a name list had
+// missed. Measured on all seven engines including PostgreSQL, where it correctly
+// returns nothing; a user's own schema is never extension-owned, so it always
+// survives. Kept free of parentheses so the fallback below can strip it by regex.
+const EXTENSION_OWNED_SCHEMAS_SQL =
+  "SELECT n.nspname FROM pg_namespace n " +
+  "JOIN pg_depend d ON d.objid = n.oid AND d.classid = 'pg_namespace'::regclass AND d.deptype = 'e' " +
+  "JOIN pg_extension e ON e.oid = d.refobjid";
+
+// What counts as a table, single-sourced because two readers ask: the object browser
+// and the overview's count. They answered from different catalogs and disagreed twice
+// - 98 against 2 on CockroachDB, then 4 against 3 on Materialize once materialized
+// views joined the browser - so both now read information_schema.tables through this.
+const USER_TABLE_TYPES = "'BASE TABLE', 'MATERIALIZED VIEW'";
+
+// The full "this schema is not the engine's own" test for one column: a fixed list of
+// engine-builtin schemas, plus anything an extension created.
+function schemaExclusion(column: string): string {
+  return `${column} NOT IN (${SYSTEM_SCHEMA_LIST}) AND ${column} NOT IN (${EXTENSION_OWNED_SCHEMAS_SQL})`;
+}
 
 // Reusable CTE fragments (no trailing comma). Composed into the queries below;
 // kept single-sourced so the shared CTEs aren't duplicated across queries.
@@ -169,8 +185,8 @@ const CTE_TABLES_INFO = `
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
           LEFT JOIN pg_class c ON c.oid = (quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))::regclass
-          WHERE t.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
-          AND t.table_type IN ('BASE TABLE', 'MATERIALIZED VIEW')
+          WHERE ${schemaExclusion("t.table_schema")}
+          AND t.table_type IN (${USER_TABLE_TYPES})
         )`;
 
 const CTE_COLUMNS_INFO = `
@@ -187,7 +203,7 @@ const CTE_COLUMNS_INFO = `
               ) ORDER BY c.ordinal_position
             ) FILTER (WHERE c.ordinal_position <= 100) as columns
           FROM information_schema.columns c
-          WHERE c.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
+          WHERE ${schemaExclusion("c.table_schema")}
           GROUP BY c.table_schema, c.table_name
         )`;
 
@@ -202,7 +218,7 @@ const CTE_PK_INFO = `
             ON tc.constraint_name = kcu.constraint_name
             AND tc.table_schema = kcu.table_schema
           WHERE tc.constraint_type = 'PRIMARY KEY'
-          AND tc.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
+          AND ${schemaExclusion("tc.table_schema")}
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -227,7 +243,7 @@ const CTE_FK_INFO = `
             ON ccu.constraint_name = tc.constraint_name
             AND ccu.constraint_schema = tc.constraint_schema
           WHERE tc.constraint_type = 'FOREIGN KEY'
-          AND tc.table_schema NOT IN (${SYSTEM_SCHEMA_LIST})
+          AND ${schemaExclusion("tc.table_schema")}
           GROUP BY tc.table_schema, tc.table_name
         )`;
 
@@ -251,7 +267,7 @@ const CTE_INDEX_INFO = `
           JOIN pg_class t ON t.oid = ix.indrelid
           JOIN pg_class i ON i.oid = ix.indexrelid
           JOIN pg_namespace n ON n.oid = t.relnamespace
-          WHERE n.nspname NOT IN (${SYSTEM_SCHEMA_LIST})
+          WHERE ${schemaExclusion("n.nspname")}
           GROUP BY n.nspname, t.relname
         )`;
 
@@ -354,9 +370,10 @@ function isMissingJsonAggError(error: unknown): boolean {
 
 // Replaces one named CTE's body, matching the closing parenthesis by depth rather
 // than by text, because the fallbacks above have already rewritten parts of this
-// SQL by the time this one runs and a literal match would no longer find it. Safe
-// for the CTE it is used on below, whose string literals contain no parentheses;
-// it is not a general SQL parser. Returns the SQL untouched when the CTE is absent,
+// SQL by the time this one runs and a literal match would no longer find it. Brackets
+// inside single-quoted strings are skipped, so a literal cannot move the boundary; it
+// is still not a general SQL parser (no dollar-quoting, no comments). Returns the SQL
+// untouched when the CTE is absent,
 // which is how a query that never joined the FK catalog reports "not repairable"
 // instead of silently retrying something it did not change.
 function replaceCteBody(sql: string, cteName: string, body: string): string {
@@ -367,9 +384,17 @@ function replaceCteBody(sql: string, cteName: string, body: string): string {
   const bodyStart = match.index + match[0].length;
   let depth = 1;
   let cursor = bodyStart;
+  let inLiteral = false;
   while (cursor < sql.length && depth > 0) {
-    if (sql[cursor] === "(") depth++;
-    else if (sql[cursor] === ")") depth--;
+    const char = sql[cursor];
+    // A bracket inside a quoted string is text, not structure. SQL escapes a quote by
+    // doubling it, and flipping twice lands back on the same state, so '' needs no
+    // special case. These CTEs use no dollar-quoting.
+    if (char === "'") inLiteral = !inLiteral;
+    else if (!inLiteral) {
+      if (char === "(") depth++;
+      else if (char === ")") depth--;
+    }
     cursor++;
   }
   return sql.slice(0, bodyStart) + body + sql.slice(cursor - 1);
@@ -398,18 +423,19 @@ function isMissingConstraintColumnUsageError(error: unknown): boolean {
   return error.message.toLowerCase().includes("constraint_column_usage");
 }
 
-// True only when the engine says a pg_* object it was asked for is not there, which
-// is an absence the statistics panels can report as "no rows". Both halves matter:
-// Cloudberry answers "query plan with multiple segworker groups is not supported"
-// for the same queries while pg_stat_user_tables exists and is readable, and reading
-// that as an empty database would turn a planner restriction into a false claim that
-// the database has no tables. It names no pg_ object, so it still reaches the panel.
-const ABSENT_OBJECT_PHRASES = ["does not exist", "unknown catalog item", "unknown function"];
+// Every engine probed accepts the ownership test, PostgreSQL 18.4, TimescaleDB,
+// YugabyteDB, Cloudberry, AlloyDB Omni, CockroachDB and Materialize among them, but
+// the driver serves engines nobody here has run. One that has no pg_depend or
+// pg_extension drops the clause and keeps the fixed list, which is what it filtered
+// on before ownership was asked at all.
+function withoutExtensionOwnershipTest(sql: string): string {
+  return sql.replace(/\s+AND\s+[\w.]+ NOT IN \(SELECT n\.nspname FROM pg_namespace n JOIN pg_depend[^)]*\)/g, "");
+}
 
-function namesAbsentPgObject(error: unknown): boolean {
+function isMissingExtensionCatalogError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const message = error.message.toLowerCase();
-  return ABSENT_OBJECT_PHRASES.some((phrase) => message.includes(phrase)) && /\bpg_\w+/.test(message);
+  return message.includes("pg_depend") || message.includes("pg_extension");
 }
 
 // ============================================================================
@@ -506,8 +532,9 @@ const OVERVIEW_SIZE_SQL = `
 // getOverview: user table and index counts across all user schemas.
 const OVERVIEW_COUNTS_SQL = `
         SELECT
-          (SELECT count(*) FROM pg_tables WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})) as table_count,
-          (SELECT count(*) FROM pg_indexes WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})) as index_count
+          (SELECT count(*) FROM information_schema.tables
+            WHERE ${schemaExclusion("table_schema")} AND table_type IN (${USER_TABLE_TYPES})) as table_count,
+          (SELECT count(*) FROM pg_indexes WHERE ${schemaExclusion("schemaname")}) as index_count
       `;
 
 // getPerformanceMetrics: buffer cache hit ratio. NULL when there is nothing to
@@ -1284,6 +1311,7 @@ export class PostgresProvider extends SQLBaseProvider {
       { matches: isMissingTotalRelationSizeError, apply: withoutTotalRelationSizeFn },
       { matches: isMissingJsonAggError, apply: withoutJsonAggFunctions },
       { matches: isMissingConstraintColumnUsageError, apply: withoutForeignKeyCatalog },
+      { matches: isMissingExtensionCatalogError, apply: withoutExtensionOwnershipTest },
     ];
     let currentSql = sql;
     for (;;) {
@@ -1291,7 +1319,9 @@ export class PostgresProvider extends SQLBaseProvider {
         return await client.query(currentSql);
       } catch (error) {
         const index = remainingFallbacks.findIndex((fallback) => fallback.matches(error));
-        if (index === -1) throw mapDatabaseError(error, "postgres", sql);
+        // currentSql, not sql: the chain rewrites the statement as it goes, and quoting
+        // the original would point a reader at text the server never received.
+        if (index === -1) throw mapDatabaseError(error, "postgres", currentSql);
         currentSql = remainingFallbacks[index].apply(currentSql);
         remainingFallbacks.splice(index, 1);
       }
@@ -1861,18 +1891,10 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema ? `WHERE schemaname = $1` : `WHERE schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
+      const whereClause = schema ? `WHERE schemaname = $1` : `WHERE ${schemaExclusion("schemaname")}`;
       const params = schema ? [schema] : [];
 
-      // An engine with no size functions (Materialize) answers no rows rather than
-      // failing the panel, matching getSlowQueries()/getActiveSessions() above.
-      let res: PgQueryResult;
-      try {
-        res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
-      } catch (error) {
-        if (!namesAbsentPgObject(error)) throw error;
-        return [];
-      }
+      const res = await client.query(`${TABLE_STATS_SELECT_SQL}${whereClause}${TABLE_STATS_ORDER_SQL}`, params);
 
       return res.rows.map((r) => ({
         schemaName: r.schema_name,
@@ -1905,17 +1927,10 @@ export class PostgresProvider extends SQLBaseProvider {
     const client = await this.pool!.connect();
     try {
       // If schema is specified, filter by it; otherwise get all user schemas
-      const whereClause = schema ? `WHERE s.schemaname = $1` : `WHERE s.schemaname NOT IN (${SYSTEM_SCHEMA_LIST})`;
+      const whereClause = schema ? `WHERE s.schemaname = $1` : `WHERE ${schemaExclusion("s.schemaname")}`;
       const params = schema ? [schema] : [];
 
-      // Same rule as getTableStats(): an absent statistics catalog is no rows.
-      let res: PgQueryResult;
-      try {
-        res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);
-      } catch (error) {
-        if (!namesAbsentPgObject(error)) throw error;
-        return [];
-      }
+      const res = await client.query(`${INDEX_STATS_SELECT_SQL}${whereClause}${INDEX_STATS_GROUP_ORDER_SQL}`, params);
 
       return res.rows.map((r) => ({
         schemaName: r.schema_name,
@@ -1945,23 +1960,17 @@ export class PostgresProvider extends SQLBaseProvider {
     try {
       const results: StorageStats[] = [];
 
-      // Get tablespace info. An engine with no pg_tablespace_size() (Materialize)
-      // contributes no tablespace rows rather than failing the panel - the same rule
-      // WAL below has always followed, and the one getTableStats() follows above.
-      try {
-        const tsRes = await client.query(STORAGE_TABLESPACES_SQL);
+      // Get tablespace info
+      const tsRes = await client.query(STORAGE_TABLESPACES_SQL);
 
-        for (const row of tsRes.rows) {
-          results.push({
-            name: row.name,
-            location: row.location || "default",
-            size: row.size || "0 bytes",
-            sizeBytes: parseInt(row.size_bytes || "0"),
-            usagePercent: undefined, // Would need disk space info
-          });
-        }
-      } catch (error) {
-        if (!namesAbsentPgObject(error)) throw error;
+      for (const row of tsRes.rows) {
+        results.push({
+          name: row.name,
+          location: row.location || "default",
+          size: row.size || "0 bytes",
+          sizeBytes: parseInt(row.size_bytes || "0"),
+          usagePercent: undefined, // Would need disk space info
+        });
       }
 
       // Get WAL info (if superuser or has permissions)

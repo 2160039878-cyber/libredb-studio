@@ -352,7 +352,7 @@ function defaultMockQuery(sql: string): Promise<{ rows: unknown[]; fields?: { na
   }
 
   // Schema CTE query: information_schema + table_type in ('base table'
-  if (normalized.includes("information_schema") && normalized.includes("table_type in ('base table'")) {
+  if (normalized.includes("tables_info as materialized (") || normalized.includes("tables_info as (")) {
     return Promise.resolve({
       rows: [
         {
@@ -441,8 +441,9 @@ function defaultMockQuery(sql: string): Promise<{ rows: unknown[]; fields?: { na
     });
   }
 
-  // getOverview: table + index counts
-  if (normalized.includes("pg_tables") && normalized.includes("pg_indexes")) {
+  // getOverview: table + index counts. Keyed on the output column rather than on the
+  // catalogs, which have already moved once (pg_tables -> information_schema.tables).
+  if (normalized.includes("as table_count") && normalized.includes("as index_count")) {
     return Promise.resolve({
       rows: [{ table_count: "15", index_count: "30" }],
       fields: [],
@@ -1408,8 +1409,9 @@ describe("PostgresProvider", () => {
       "pg_aoseg",
       "pg_bitmapindex",
       "pg_ext_aux",
-      // AlloyDB Omni - created by the google_ml_integration extension
-      "google_ml",
+      // AlloyDB Omni is not here on purpose: its google_ml schema is extension-created,
+      // so the ownership test covers it and no user schema can collide with the name.
+      // See "extension-created schemas are excluded by ownership, not by name" below.
     ];
 
     // Capture every statement the provider sends while exercising the surfaces
@@ -1479,6 +1481,60 @@ describe("PostgresProvider", () => {
         }
       }
       expect(unfiltered).toEqual([]);
+    });
+
+    test("extension-created schemas are excluded by ownership, not by name", async () => {
+      // A hardcoded "google_ml" would hide a real schema from anyone who happened to
+      // name one that - it is the only entry on the list a user could plausibly pick.
+      // pg_depend answers the question the name was standing in for, and answers it
+      // better: on a live AlloyDB Omni it returns google_ml AND ai, which the name
+      // list had missed. Measured working on all seven engines, PostgreSQL included,
+      // where it correctly returns nothing.
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+      await provider.getOverview();
+      await provider.getTableStats();
+      await provider.getIndexStats();
+
+      const filtered = seen.filter((sql) => sql.includes("NOT IN ('pg_catalog'"));
+      expect(filtered.length).toBeGreaterThan(0);
+      for (const sql of filtered) {
+        expect(sql).toContain("pg_depend");
+      }
+      // And the name it replaces is gone, so a user's own google_ml stays visible.
+      expect(seen.some((sql) => sql.includes("'google_ml'"))).toBe(false);
+    });
+
+    test("the overview counts a table the same way the object browser does", async () => {
+      // These are the two readers that disagreed on CockroachDB, and adding
+      // materialized views to the browser split them again on Materialize: the browser
+      // said 4 and the overview 3, because pg_tables has no materialized views in it.
+      // One definition of "a table" or the panels drift apart again on the next engine.
+      const seen: string[] = [];
+      mockQueryFn = (sql: string) => {
+        seen.push(sql);
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+      await provider.getOverview();
+
+      const browserQuery = seen.find((sql) => sql.includes("tables_info AS MATERIALIZED ("));
+      const countsQuery = seen.find((sql) => sql.includes("as table_count"));
+      expect(browserQuery).toBeDefined();
+      expect(countsQuery).toBeDefined();
+
+      // Same source and same type list, not merely both filtered somehow.
+      expect(countsQuery).toContain("information_schema.tables");
+      expect(countsQuery).toContain("'MATERIALIZED VIEW'");
+      expect(countsQuery).toContain("'BASE TABLE'");
     });
 
     test("getOverview() counts exclude CockroachDB's crdb_internal and pg_extension", async () => {
@@ -1575,6 +1631,76 @@ describe("PostgresProvider", () => {
       expect(countParens(attempts[1])).toEqual({ balanced: true });
     });
 
+    test("a parenthesis inside a string literal does not move the CTE boundary", async () => {
+      // replaceCteBody() counts brackets to find where the CTE ends. Today fk_info's
+      // literals contain none, so the count is right by luck rather than by rule. This
+      // pins the rule: the engine sees an unbalanced ")" inside a quoted string, and a
+      // scanner that counted it would cut the CTE short and corrupt everything after.
+      const attempts: string[] = [];
+      mockQueryFn = (sql: string) => {
+        attempts.push(sql);
+        if (sql.includes("constraint_column_usage")) {
+          return Promise.reject(new Error("unknown catalog item 'information_schema.constraint_column_usage'"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await provider.getSchema();
+
+      const rewritten = attempts[attempts.length - 1];
+      // Everything the outer query needs must survive the cut, in order.
+      expect(rewritten).toContain("fk_info");
+      expect(rewritten).toContain("index_info AS MATERIALIZED (");
+      expect(rewritten).toContain("LEFT JOIN fk_info fk");
+      expect(rewritten).toContain("ORDER BY ti.table_schema");
+      expect(countParens(rewritten)).toEqual({ balanced: true });
+    });
+
+    test("an engine without pg_depend falls back to the fixed schema list", async () => {
+      // Every engine probed accepts the ownership test, but the driver serves engines
+      // nobody has run. One that has no pg_depend must keep working on the fixed list
+      // rather than losing its object browser to a filter it cannot evaluate.
+      const attempts: string[] = [];
+      mockQueryFn = (sql: string) => {
+        attempts.push(sql);
+        if (sql.includes("pg_depend")) {
+          return Promise.reject(new Error('relation "pg_depend" does not exist'));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+      expect(attempts.length).toBe(2);
+      // The ownership clause is gone and the fixed list is still doing its job.
+      expect(attempts[1]).not.toContain("pg_depend");
+      expect(attempts[1]).toContain("NOT IN ('pg_catalog'");
+      expect(countParens(attempts[1])).toEqual({ balanced: true });
+    });
+
+    test("the rethrown error carries the statement that actually failed", async () => {
+      // The chain rewrites the SQL as it goes, so reporting the original text sends a
+      // reader looking at a statement the server never saw. Here the MATERIALIZED hint
+      // is stripped, the retry fails for an unrelated reason, and the error should
+      // quote the stripped statement - the one that produced it.
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("AS MATERIALIZED (")) {
+          return Promise.reject(new Error("Expected left parenthesis, found MATERIALIZED"));
+        }
+        return Promise.reject(new Error('relation "tables_info" is not visible to this role'));
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const error = (await provider.getSchema().catch((e: unknown) => e)) as QueryError;
+      expect(error).toBeInstanceOf(QueryError);
+      expect(error.query).toBeDefined();
+      expect(error.query).not.toContain("AS MATERIALIZED (");
+    });
+
     test("getSchemaList(), which never joins the FK catalog, rethrows instead of retrying blind", async () => {
       // SCHEMA_LIST_SQL has no fk_info CTE to drop, so there is nothing this
       // fallback can rewrite. It must surface the error rather than loop or
@@ -1650,13 +1776,16 @@ describe("PostgresProvider", () => {
   });
 
   describe("statistics panels on an engine with no size functions", () => {
-    // Measured on Materialize v26.37.0: getTableStats() dies on pg_table_size and
-    // getIndexStats() on pg_stat_user_tables, so the Tables and Storage tabs printed
-    // an engine error where every neighbouring panel had already learned to say N/A.
-    // Same idiom getSlowQueries()/getActiveSessions() already use for a missing
-    // pg_stat_activity: an absence answers empty, it does not fail the panel.
+    // Measured on Materialize v26.37.0: getTableStats() dies on pg_table_size,
+    // getIndexStats() on pg_stat_user_tables and the tablespace read on
+    // pg_tablespace_size. All three REJECT rather than answering [], because
+    // MonitoringData draws that exact distinction: an absent panel means "this engine
+    // could not answer" and carries the engine's sentence under `errors`, while an
+    // empty array claims the engine answered "nothing" - a measurement it never made.
+    // PanelUnavailable then reads that sentence to decide whether the absence is an
+    // engine limit or a refused statement (see monitoring-absence.ts).
 
-    test("getTableStats() answers empty when the size function does not exist", async () => {
+    test("getTableStats() surfaces the engine's sentence instead of an empty result", async () => {
       mockQueryFn = (sql: string) => {
         if (sql.includes("pg_table_size")) {
           return Promise.reject(new Error('function "pg_table_size" does not exist'));
@@ -1666,10 +1795,10 @@ describe("PostgresProvider", () => {
       provider = new PostgresProvider(makePgConfig());
       await provider.connect();
 
-      expect(await provider.getTableStats()).toEqual([]);
+      await expect(provider.getTableStats()).rejects.toThrow(/pg_table_size/);
     });
 
-    test("getIndexStats() answers empty when the statistics catalog is absent", async () => {
+    test("getIndexStats() surfaces the engine's sentence instead of an empty result", async () => {
       mockQueryFn = (sql: string) => {
         if (sql.includes("pg_stat_user_indexes") || sql.includes("pg_stat_user_tables")) {
           return Promise.reject(new Error("unknown catalog item 'pg_stat_user_tables'"));
@@ -1679,39 +1808,19 @@ describe("PostgresProvider", () => {
       provider = new PostgresProvider(makePgConfig());
       await provider.connect();
 
-      expect(await provider.getIndexStats()).toEqual([]);
+      await expect(provider.getIndexStats()).rejects.toThrow(/pg_stat_user_tables/);
     });
 
-    test("getStorageStats() skips tablespaces when the size function does not exist", async () => {
-      // The last panel on the Storage tab still printed an engine error after the
-      // Tables tab had learned to say N/A. WAL was already guarded here; tablespaces
-      // were not, and Materialize has neither.
-      mockQueryFn = (sql: string) => {
-        if (sql.includes("pg_tablespace")) {
-          return Promise.reject(new Error('function "pg_tablespace_size" does not exist'));
-        }
-        return defaultMockQuery(sql);
-      };
-      provider = new PostgresProvider(makePgConfig());
-      await provider.connect();
-
-      // Not a throw, and not a fabricated tablespace either: WAL is the only thing
-      // this engine could answer, so it is the only thing reported.
-      const stats = await provider.getStorageStats();
-      expect(stats.every((s) => s.name !== "pg_default")).toBe(true);
-    });
-
-    test("a planner restriction still reaches the panel instead of reading as empty", async () => {
-      // Cloudberry's control case, and the reason the two above cannot just swallow
-      // every error: pg_stat_user_tables exists there and the catalog is readable -
-      // its MPP planner refuses this query's shape. "No rows" would misreport that as
-      // a database with no tables, so the engine's own words have to survive.
+    test("a planner restriction reaches the panel with its own wording", async () => {
+      // Cloudberry's control case: pg_stat_user_tables exists there and the catalog is
+      // readable, so this sentence must not be flattened into the same absence as a
+      // missing function - a different statement could still succeed.
       mockQueryFn = () => Promise.reject(new Error("query plan with multiple segworker groups is not supported"));
       provider = new PostgresProvider(makePgConfig());
       await provider.connect();
 
-      await expect(provider.getTableStats()).rejects.toThrow();
-      await expect(provider.getIndexStats()).rejects.toThrow();
+      await expect(provider.getTableStats()).rejects.toThrow(/segworker/);
+      await expect(provider.getIndexStats()).rejects.toThrow(/segworker/);
     });
   });
 
