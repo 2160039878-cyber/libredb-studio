@@ -7,7 +7,7 @@ import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from "bun:
 import { EventEmitter } from "node:events";
 import type { DatabaseConnection } from "@/lib/types";
 import type { ReadOnlyStatementBudget } from "@/lib/db/types";
-import { ConnectionError, DatabaseConfigError, ExecutionProfileError } from "@/lib/db/errors";
+import { ConnectionError, DatabaseConfigError, ExecutionProfileError, QueryError } from "@/lib/db/errors";
 import { CACHE_HIT_RATIO_UNAVAILABLE } from "@/lib/monitoring-cache-ratio";
 
 // ============================================================================
@@ -380,12 +380,21 @@ function defaultMockQuery(sql: string): Promise<{ rows: unknown[]; fields?: { na
     });
   }
 
-  // getOverview: version() + pg_postmaster_start_time()
-  if (normalized.includes("version()") && normalized.includes("pg_postmaster_start_time()")) {
+  // getOverview: version() (split from uptime so an engine without
+  // pg_postmaster_start_time() still reports a version - see postgres.ts)
+  if (normalized.includes("version()") && !normalized.includes("pg_postmaster_start_time()")) {
+    return Promise.resolve({
+      rows: [{ version: "PostgreSQL 16.2, compiled by Visual C++ build 1941, 64-bit" }],
+      fields: [],
+      rowCount: 1,
+    });
+  }
+
+  // getOverview: pg_postmaster_start_time() + uptime_seconds
+  if (normalized.includes("pg_postmaster_start_time()")) {
     return Promise.resolve({
       rows: [
         {
-          version: "PostgreSQL 16.2, compiled by Visual C++ build 1941, 64-bit",
           start_time: new Date(Date.now() - 90061000).toISOString(),
           uptime_seconds: "90061",
         },
@@ -1243,6 +1252,115 @@ describe("PostgresProvider", () => {
   });
 
   // --------------------------------------------------------------------------
+  // MATERIALIZED-keyword fallback (Materialize/RisingWave compatibility, #38680)
+  // --------------------------------------------------------------------------
+
+  describe("MATERIALIZED-keyword schema fallback", () => {
+    // Materialize/RisingWave reserve MATERIALIZED as a keyword and reject the
+    // CTE modifier with a syntax error, even though the underlying
+    // information_schema views are otherwise queryable there.
+    function rejectMaterializedHintOnce(onRetry: (sql: string) => ReturnType<typeof defaultMockQuery>) {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("AS MATERIALIZED (")) {
+          return Promise.reject(new Error('syntax error at or near "MATERIALIZED"'));
+        }
+        return onRetry(sql);
+      };
+    }
+
+    test("getSchema() retries without the hint and returns real data", async () => {
+      rejectMaterializedHintOnce(defaultMockQuery);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+    });
+
+    test("getSchemaList() and getSchemaRelations() also recover via the same fallback", async () => {
+      rejectMaterializedHintOnce(defaultMockQuery);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const list = await provider.getSchemaList();
+      expect(list.length).toBe(2);
+
+      const relations = await provider.getSchemaRelations();
+      expect(Array.isArray(relations)).toBe(true);
+    });
+
+    test("getSchema() maps and rethrows when the retry without the hint also fails", async () => {
+      mockQueryFn = () => Promise.reject(new Error('syntax error at or near "MATERIALIZED"'));
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      await expect(provider.getSchema()).rejects.toThrow(QueryError);
+      await expect(provider.getSchema()).rejects.toThrow(/materialized/i);
+    });
+
+    test("getSchema() maps and rethrows an unrelated error without retrying", async () => {
+      mockQueryFn = () => Promise.reject(new Error('relation "tables_info" does not exist'));
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      await expect(provider.getSchema()).rejects.toThrow(QueryError);
+      await expect(provider.getSchema()).rejects.toThrow(/does not exist/);
+    });
+
+    // CockroachDB accepts the MATERIALIZED hint fine (its own compatibility.ts entry
+    // says so) but has no pg_total_relation_size() builtin - hitting the second
+    // fallback as the FIRST error, with the MATERIALIZED collision never in play.
+    test("getSchema() retries around a missing pg_total_relation_size(), independent of the MATERIALIZED collision", async () => {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("pg_total_relation_size(c.oid)")) {
+          return Promise.reject(new Error("unknown function: pg_total_relation_size()"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+    });
+
+    // Materialize hits all three gaps in sequence: MATERIALIZED is rejected first,
+    // then (once stripped) pg_total_relation_size, then (once replaced) json_agg.
+    test("getSchema() chains through all three fallbacks when an engine hits every gap", async () => {
+      mockQueryFn = (sql: string) => {
+        if (sql.includes("AS MATERIALIZED (")) {
+          return Promise.reject(new Error("Expected left parenthesis, found MATERIALIZED"));
+        }
+        if (sql.includes("pg_total_relation_size(c.oid)")) {
+          return Promise.reject(new Error('function "pg_total_relation_size" does not exist'));
+        }
+        if (sql.includes("json_agg(")) {
+          return Promise.reject(new Error('function "json_agg" does not exist'));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const schema = await provider.getSchema();
+      expect(schema.length).toBe(2);
+    });
+
+    test("getSchema() maps and rethrows when the MATERIALIZED retry fails for an unrelated reason", async () => {
+      // Every attempt gets this same message: the first is consumed by the
+      // MATERIALIZED fallback (it mentions "MATERIALIZED"), but once that fallback is
+      // used up, no remaining fallback recognizes it, so the second attempt's
+      // rejection is mapped and rethrown rather than retried forever.
+      mockQueryFn = () =>
+        Promise.reject(new Error("syntax error: Expected left parenthesis, found MATERIALIZED; unrelated cause"));
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      await expect(provider.getSchema()).rejects.toThrow(QueryError);
+    });
+  });
+
+  // --------------------------------------------------------------------------
   // Health
   // --------------------------------------------------------------------------
 
@@ -1323,6 +1441,81 @@ describe("PostgresProvider", () => {
       expect(Array.isArray(health.slowQueries)).toBe(true);
       expect(health.slowQueries.length).toBe(1);
       expect(health.slowQueries[0].query).toContain("pg_stat_statements extension not enabled");
+    });
+
+    // Engines with no pg statistics catalog at all (Materialize, RisingWave)
+    // reject every query below, not just pg_stat_statements. Each must degrade
+    // its own panel instead of failing the whole health check (#38680).
+    test("activeConnections is omitted when the pg_stat_activity count query fails", async () => {
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const originalMock = mockQueryFn;
+      mockQueryFn = async (sql: string, params?: unknown[]) => {
+        const normalized = sql.trim().toLowerCase();
+        if (normalized.includes("count(*)") && normalized.includes("pg_stat_activity")) {
+          throw new Error('relation "pg_stat_activity" does not exist');
+        }
+        return originalMock(sql, params);
+      };
+
+      const health = await provider.getHealth();
+      expect(health.activeConnections).toBeUndefined();
+    });
+
+    test("databaseSize falls back to N/A when pg_database_size fails", async () => {
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const originalMock = mockQueryFn;
+      mockQueryFn = async (sql: string, params?: unknown[]) => {
+        const normalized = sql.trim().toLowerCase();
+        if (normalized.includes("pg_size_pretty") && normalized.includes("pg_database_size")) {
+          throw new Error("function pg_database_size(text) does not exist");
+        }
+        return originalMock(sql, params);
+      };
+
+      const health = await provider.getHealth();
+      expect(health.databaseSize).toBe("N/A");
+    });
+
+    test("cacheHitRatio reports unavailable when pg_statio_user_tables fails outright", async () => {
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const originalMock = mockQueryFn;
+      mockQueryFn = async (sql: string, params?: unknown[]) => {
+        const normalized = sql.trim().toLowerCase();
+        if (normalized.includes("pg_statio_user_tables")) {
+          throw new Error('relation "pg_statio_user_tables" does not exist');
+        }
+        return originalMock(sql, params);
+      };
+
+      const health = await provider.getHealth();
+      expect(health.cacheHitRatio).toBe(CACHE_HIT_RATIO_UNAVAILABLE);
+    });
+
+    test("activeSessions falls back to an empty array when the sessions query fails", async () => {
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+
+      const originalMock = mockQueryFn;
+      mockQueryFn = async (sql: string, params?: unknown[]) => {
+        const normalized = sql.trim().toLowerCase();
+        if (
+          normalized.includes("pg_stat_activity") &&
+          normalized.includes("pid != pg_backend_pid()") &&
+          normalized.includes("xact_start desc")
+        ) {
+          throw new Error('relation "pg_stat_activity" does not exist');
+        }
+        return originalMock(sql, params);
+      };
+
+      const health = await provider.getHealth();
+      expect(health.activeSessions).toEqual([]);
     });
 
     test("sessions data is populated", async () => {

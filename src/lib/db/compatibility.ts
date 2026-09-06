@@ -195,21 +195,21 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     name: "CockroachDB",
     via: "postgres",
     tier: "partial",
-    probedVersion: "CockroachDB CCL v26.2.5",
+    probedVersion: "CockroachDB CCL v26.2.6",
     caveats: [
-      "The object browser is empty: CockroachDB has no pg_total_relation_size() builtin, which our schema query calls.",
-      "Health, overview, monitoring, table, index and storage panels are unavailable: pg_size_pretty(), pg_postmaster_start_time() and pg_tablespace_location() do not exist there.",
+      "The object browser now lists real tables (previously empty, #38680): the schema query recovers from the missing pg_total_relation_size() builtin by falling back to an unmeasured (0-byte) size instead of failing outright. Foreign keys and indexes are unaffected by this and continue to work.",
+      "The overview panel loads with connections/size/uptime marked unavailable rather than failing outright: pg_postmaster_start_time(), pg_size_pretty() and pg_tablespace_location() do not exist there.",
       "Performance metrics, slow queries and active sessions do work: the pg_stat_* views CockroachDB provides are enough for them.",
     ],
   },
   {
     name: "Materialize",
     via: "postgres",
-    tier: "query-only",
-    probedVersion: "Materialize 26.37.0 (advertises PostgreSQL 9.5)",
+    tier: "partial",
+    probedVersion: "Materialize 26.40.0 (advertises PostgreSQL 9.5)",
     caveats: [
-      "Only the SQL editor works. The object browser, the monitoring dashboard and every statistics panel are unavailable.",
-      "Materialize has no pg statistics catalog and no size functions, and it reserves the MATERIALIZED keyword our schema query uses.",
+      "The object browser lists tables and columns (previously nothing worked at all, #38680): the schema query recovers from the reserved MATERIALIZED keyword, the missing pg_total_relation_size() builtin, and json_agg()/json_build_object() (Materialize only has the jsonb_ equivalents) by retrying without each. Foreign keys and indexes stay unavailable: Materialize has no information_schema.constraint_column_usage.",
+      "The monitoring dashboard loads with every statistic marked unavailable rather than erroring the whole page: Materialize has no pg statistics catalog and no size functions.",
     ],
   },
   {
@@ -218,8 +218,8 @@ export const WIRE_COMPATIBLE_ENGINES: readonly WireCompatibleEngine[] = [
     tier: "query-only",
     probedVersion: "RisingWave 3.0.3 (advertises PostgreSQL 13.14.0)",
     caveats: [
-      "Only the SQL editor works. The object browser, the monitoring dashboard and every statistics panel are unavailable.",
-      "RisingWave rejects a parameterised LIMIT, so the slow-query and active-session panels cannot run at all.",
+      'The object browser is unavailable: the schema query\'s LEFT JOIN pg_class ON (...)::regclass fails to bind ("missing FROM-clause entry for table c") - a different gap than the MATERIALIZED keyword collision Materialize hits, and not yet worked around.',
+      "The monitoring dashboard now loads with every statistic marked unavailable rather than erroring the whole page: RisingWave has no pg statistics catalog at all. Slow-query and active-session panels stay empty (not merely unavailable) because RisingWave also rejects a parameterised LIMIT.",
     ],
   },
   {

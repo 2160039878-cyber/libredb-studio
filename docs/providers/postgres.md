@@ -120,6 +120,41 @@ large schema (100+ tables/constraints/indexes) that explodes into minutes of pla
 
 If you edit these queries, keep `MATERIALIZED` or you reintroduce the timeout.
 
+**Fallback chain for engines that reject part of this query (#38680).** `getSchema()`,
+`getSchemaList()`, and `getSchemaRelations()` all route their query through
+`queryWithMaterializedFallback()` ([postgres.ts](../../src/lib/db/providers/sql/postgres.ts)), which
+recovers real object-browser data on three independent gaps instead of failing outright:
+
+1. **The `MATERIALIZED` keyword itself.** Materialize and RisingWave reserve it for their own
+   `CREATE MATERIALIZED VIEW` grammar and reject the CTE modifier, even though the underlying
+   `information_schema` views are otherwise readable there. `withoutMaterializedHint()` strips it.
+2. **`pg_total_relation_size()`.** CockroachDB has no such builtin at all — this is why its object
+   browser used to read empty even though it happily accepts the `MATERIALIZED` hint — and
+   Materialize reaches the same gap once past #1. `withoutTotalRelationSizeFn()` replaces the call
+   with a literal `0`, trading per-table size for real column/PK data instead of nothing.
+3. **`json_agg()` / `json_build_object()`.** Materialize has neither, only the `jsonb_` forms
+   (verified: they return the identical shape over the wire — `pg` parses both OIDs into plain JS
+   values). `withoutJsonAggFunctions()` swaps the function names.
+
+Each fallback is matched against whichever error actually comes back, not tried in a fixed order —
+CockroachDB hits #2 as its *first* error with #1 never in play, Materialize hits all three in
+sequence. Real PostgreSQL never takes any retry path; it accepts every construct above and the first
+attempt succeeds. An error no fallback recognizes, or one that survives every applicable fallback, is
+mapped through `mapDatabaseError()` and rethrown rather than left raw.
+
+**What still doesn't work.** Materialize has no `information_schema.constraint_column_usage`, so
+`getSchemaRelations()` (foreign keys/indexes) fails outright there — the two-phase split in §3.3
+means this degrades to "table list unaffected" rather than blocking the object browser entirely.
+RisingWave's object browser remains unavailable for a different, unrelated reason: its query binder
+fails on the `LEFT JOIN pg_class ON (...)::regclass` pattern itself (`missing FROM-clause entry for
+table c`), which none of the three fallbacks above address.
+
+**Materialize's own catalog also joins the schema exclusion list.** `mz_catalog`/`mz_internal` were
+added beside `pg_catalog`/`information_schema`/`pg_toast` everywhere that list appears in this file
+(schema, table stats, index stats) — real PostgreSQL never has schemas by those names, so it's a
+no-op there, but without it Materialize's own system catalog floods the object browser with dozens
+of internal relations.
+
 ### 3.2 Schema SQL hoisted to module scope
 
 `SCHEMA_FULL_SQL`, `SCHEMA_LIST_SQL`, and `SCHEMA_RELATIONS_SQL` are module-level `const`s, not
@@ -170,6 +205,25 @@ Monitoring never hard-fails on a missing optional feature:
 - A metric the statistics views did not publish is **omitted rather than defaulted**
   ([§7.1](#71-when-the-cache-hit-ratio-is-not-measurable)); `deadlocks` is absent when
   `pg_stat_database` has no row for the database, rather than reported as zero deadlocks.
+- `getHealth()` isolates each of its five queries in its own try/catch
+  ([postgres.ts](../../src/lib/db/providers/sql/postgres.ts)). This matters beyond the
+  `pg_stat_statements` case above: an engine with no pg statistics catalog at all (Materialize,
+  RisingWave, #38680) rejects `pg_stat_activity` and `pg_statio_user_tables` outright, not just the
+  one optional extension. `activeConnections` is omitted (`undefined`), `databaseSize` and
+  `cacheHitRatio` report `"N/A"`/`CACHE_HIT_RATIO_UNAVAILABLE`, and `activeSessions` is `[]` — the
+  dashboard degrades panel-by-panel instead of the whole health check throwing.
+- The same isolation extends to `getOverview()`, `getPerformanceMetrics()`, `getSlowQueries()` and
+  `getActiveSessions()` (#38680) — these are the four "core" reads `getMonitoringData()`
+  (`base-provider.ts`) requires at least one of to succeed before it renders a dashboard at all; on
+  an engine with no statistics catalog every one of them used to reject in full (each ran several
+  unguarded queries in sequence), so the **entire Monitoring page** showed a connection-error
+  screen even though `getHealth()`'s own badge degraded fine. `getOverview()`'s single `version() +
+  pg_postmaster_start_time()` query is now two queries (`OVERVIEW_VERSION_SQL` /
+  `OVERVIEW_UPTIME_SQL`), because a single `SELECT` fails whole-row if any one column's function is
+  missing — version() alone still answers on Materialize even though uptime does not.
+  `getSlowQueries()`'s existing `pg_stat_statements` → `pg_stat_activity` fallback now has a second
+  layer: if `pg_stat_activity` is *also* absent, it returns `[]` instead of propagating that second
+  rejection.
 
 ### 3.6 Safe maintenance targets
 
