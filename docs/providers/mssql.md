@@ -656,11 +656,11 @@ initialiser printed a confident `0 bytes` directly above *"No storage size infor
 was the odd one out; #569 (libSQL) and #517 (the search provider) merged the same
 pairing.
 
-A database that really measures `0` is a **reading** and is kept. `SUM(...)` over no row answers
-`NULL`, `Number(... || 0)` folds that to `0`, and the tab formats the `0 B` it was given. The absence
-is spelled `=== undefined` plus a conditional spread, never a falsy test: a falsy test would erase
-the very measurement it was meant to publish, which is the mistake §7.2 records for the connection
-count.
+A database that really measures `0` is a **reading** and is kept. `SUM(...)` over no input answers
+one row of `NULL`, which the provider maps to `0`; the tab then formats the `0 B` it was given. If
+the driver returns no row, no expected column, or a non-finite value, the measurement is absent and
+the string stays `N/A`. The shared `measuredNullableAggregate()` boundary preserves those states
+without a falsy test that would erase a genuine zero.
 
 ---
 

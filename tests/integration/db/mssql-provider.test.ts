@@ -1561,8 +1561,8 @@ describe("MSSQLProvider", () => {
     test("a database that measures zero bytes keeps its measured zero size", async () => {
       // The anti-vacuity twin of the test above: absence must never be spelled with a
       // falsy test. `SUM(CAST(size AS BIGINT))` returns NULL when the aggregate has no
-      // row to sum, and `Number(... || 0)` reads that as 0 - a measurement, not a
-      // refusal - so the key stays present and the Storage tab formats the zero it was
+      // row to sum. The provider deliberately treats that returned null aggregate as
+      // a measured zero, so the key stays present and the Storage tab formats the zero it was
       // given rather than claiming it knows nothing.
       mockQueryFn = async (sql: string) => {
         const upper = sql.toUpperCase();
@@ -1578,6 +1578,51 @@ describe("MSSQLProvider", () => {
       expect("databaseSizeBytes" in overview).toBe(true);
       expect(overview.databaseSizeBytes).toBe(0);
       expect(overview.databaseSize).toBe("0 B");
+    });
+
+    test("a size read with no result row leaves overview size absent", async () => {
+      mockQueryFn = async (sql: string) => {
+        if (sql.toUpperCase().includes("SYS.DATABASE_FILES")) {
+          return { recordset: [], rowsAffected: [0] };
+        }
+        return defaultQuery(sql);
+      };
+
+      await provider.connect();
+      const overview = await provider.getOverview();
+
+      expect("databaseSizeBytes" in overview).toBe(false);
+      expect(overview.databaseSize).toBe("N/A");
+    });
+
+    test("a size result without the expected column leaves overview size absent", async () => {
+      mockQueryFn = async (sql: string) => {
+        if (sql.toUpperCase().includes("SYS.DATABASE_FILES")) {
+          return { recordset: [{ unrelated: 1 }], rowsAffected: [1] };
+        }
+        return defaultQuery(sql);
+      };
+
+      await provider.connect();
+      const overview = await provider.getOverview();
+
+      expect("databaseSizeBytes" in overview).toBe(false);
+      expect(overview.databaseSize).toBe("N/A");
+    });
+
+    test("a non-finite size leaves overview size absent", async () => {
+      mockQueryFn = async (sql: string) => {
+        if (sql.toUpperCase().includes("SYS.DATABASE_FILES")) {
+          return { recordset: [{ size_bytes: Number.POSITIVE_INFINITY }], rowsAffected: [1] };
+        }
+        return defaultQuery(sql);
+      };
+
+      await provider.connect();
+      const overview = await provider.getOverview();
+
+      expect("databaseSizeBytes" in overview).toBe(false);
+      expect(overview.databaseSize).toBe("N/A");
     });
 
     test("Azure SQL detection from hostname", () => {

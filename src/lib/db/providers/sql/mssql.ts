@@ -31,6 +31,7 @@ import {
 import { DatabaseConfigError, ConnectionError, QueryError, mapDatabaseError } from "../../errors";
 import { formatBytes } from "../../utils/pool-manager";
 import { analyzeQuery, DEFAULT_QUERY_LIMIT, MAX_UNLIMITED_ROWS } from "../../utils/query-limiter";
+import { measuredNullableAggregate } from "../../utils/measured-aggregate";
 import { readLeadingKeyword } from "@/lib/sql/leading-keyword";
 import { resolveSqlGrammar, type SqlGrammar } from "@/lib/sql/grammar";
 import { readStatementEnd } from "@/lib/sql/statement-end";
@@ -1179,11 +1180,8 @@ export class MSSQLProvider extends SQLBaseProvider {
       // Database size
       try {
         const sizeRes = await this.pool!.request().query(OVERVIEW_DATABASE_SIZE_SQL);
-        // `|| 0`, not measuredNumber: SUM over no row answers NULL and that is a
-        // measured zero here, so unlike the count above this reading keeps its falsy
-        // fold. Only the catch below leaves the figure absent.
-        databaseSizeBytes = Number(sizeRes.recordset[0]?.size_bytes || 0);
-        databaseSize = formatBytes(databaseSizeBytes);
+        databaseSizeBytes = measuredNullableAggregate(sizeRes.recordset[0], "size_bytes");
+        if (databaseSizeBytes !== undefined) databaseSize = formatBytes(databaseSizeBytes);
       } catch {
         /* The size stays absent, never 0, and `databaseSize` keeps the "N/A" it was
            initialised with. */

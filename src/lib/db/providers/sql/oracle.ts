@@ -37,6 +37,7 @@ import {
 } from "../../errors";
 import { formatBytes } from "../../utils/pool-manager";
 import { analyzeQuery, DEFAULT_QUERY_LIMIT, MAX_UNLIMITED_ROWS } from "../../utils/query-limiter";
+import { measuredNullableAggregate } from "../../utils/measured-aggregate";
 import { resolveSqlGrammar } from "@/lib/sql/grammar";
 import { readStatementEnd } from "@/lib/sql/statement-end";
 import { CACHE_HIT_RATIO_UNAVAILABLE, formatCacheHitRatio, measuredNumber } from "@/lib/monitoring-cache-ratio";
@@ -1254,12 +1255,9 @@ export class OracleProvider extends SQLBaseProvider {
         const sizeRes = await conn.execute(`SELECT SUM(BYTES) AS TOTAL FROM USER_SEGMENTS`, [], {
           outFormat: oracledb.OUT_FORMAT_OBJECT,
         });
-        // `|| 0`, not measuredNumber: a schema that owns no segment answers one row
-        // whose SUM is NULL, and that is a measured zero rather than an unknown - so
-        // unlike the count above this reading keeps its falsy fold, and only the catch
-        // below leaves the figure absent.
-        databaseSizeBytes = Number(((sizeRes.rows || []) as Record<string, unknown>[])[0]?.TOTAL || 0);
-        databaseSize = formatBytes(databaseSizeBytes);
+        const sizeRows = (sizeRes.rows || []) as Record<string, unknown>[];
+        databaseSizeBytes = measuredNullableAggregate(sizeRows[0], "TOTAL");
+        if (databaseSizeBytes !== undefined) databaseSize = formatBytes(databaseSizeBytes);
       } catch {
         /* The size stays absent, never 0, and `databaseSize` keeps the "N/A" it was
            initialised with. */
