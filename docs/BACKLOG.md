@@ -836,7 +836,7 @@ editing it here changes nothing a user sees until the channel is re-submitted.
 
 Two claims had to be narrowed rather than kept, both caught by review rather than by a gate: AI
 explanation is **not** offered on every connection (it is derived from the engine's `EXPLAIN` plan, so
-`BottomPanel.tsx` hides the tab wherever `capabilities.explainFormat` is absent - 7 of the 14
+`BottomPanel.tsx` hides the tab wherever `capabilities.explainFormat` is absent - 7 of the 16
 engines), and "never executes what it recommends" is the formulation #449 already rejected, because
 the consented hand-over runs exactly the recommended statement
 (`src/app/api/agent/runs/[runId]/handover/route.ts`). `tests/unit/marketplace-copy.test.ts` now binds
