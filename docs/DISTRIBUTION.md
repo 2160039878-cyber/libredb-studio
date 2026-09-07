@@ -739,7 +739,7 @@ resolves from the community repository and every release packs and pushes automa
 > runs even though both releases published correctly. The 2026-08-24 approval set
 > `ci_enabled: true` and `status: live` in a single edit — exactly what winget got once its
 > listing merged. The community feed has moved with every release since and serves 0.13.6 today,
-> one behind, which is moderation lag; do not re-dispatch `release-artifacts` for an already-published version to
+> behind the current release, which is moderation lag; do not re-dispatch `release-artifacts` for an already-published version to
 > backfill the feed, because its asset steps would fight the immutable release — push a back
 > version by hand (the same choco container the job uses for Chocolatey; the [manual manifest
 > recipe](#windows-first-listing-checklist) for winget).
@@ -967,7 +967,7 @@ this repo: the Sealos template lives upstream in
 [`labring-actions/templates`](https://github.com/labring-actions/templates) and the Unraid template
 in [`libredb/unraid-templates`](https://github.com/libredb/unraid-templates), and neither has a
 `deploy/<provider>/` folder here at all. They are two of the eight catalog channels with no such
-folder - the others are TrueNAS SCALE, the four open submissions (CasaOS, Umbrel, Easypanel,
+folder - the others are TrueNAS SCALE, CasaOS, the three open submissions (Umbrel, Easypanel,
 Portainer) and Google Cloud Marketplace, whose artefacts live in Google's Producer Portal. The
 catalog channels that DO keep a folder keep their notes in `deploy/<provider>/README.md` - CapRover and Railway alongside the source
 descriptor itself, Dokploy, Kubero and Cosmos as notes only, since those three descriptors are also
@@ -1041,7 +1041,7 @@ no pin.
 
 **The Marketplace version is its own number.** Google requires the chart and the image tags of a
 Terraform Kubernetes app to share a MAJOR.MINOR, which the repo's chart version (`0.1.x`) and the
-application version (`0.13.x`) do not. The published copy is therefore packaged with a version of
+application version (`0.14.x`) do not. The published copy is therefore packaged with a version of
 its own — `helm package --version <n> --app-version <n>` at submission time, leaving the repo's
 chart untouched. The listing currently reads **0.10**, so a Marketplace version is not comparable
 with a release tag and must not be read as one.
@@ -1541,7 +1541,7 @@ descriptor here at all.** Two of them are pinned `remote_file` against the repos
 hold it — the Sealos template in `labring-actions/templates`, the Unraid CA template in
 `libredb/unraid-templates` — and both are documented under
 [App catalogs](#app-catalogs-unraid-sealos); TrueNAS SCALE is pinned the same way against
-`truenas/apps`. The four open submissions (CasaOS, Umbrel, Easypanel, Portainer) have nothing to
+`truenas/apps`, and CasaOS against `IceWhaleTech/CasaOS-AppStore`. The three open submissions (Umbrel, Easypanel, Portainer) have nothing to
 pin until their upstream PR merges, and each entry's note names the pin to add on that day.
 [Google Cloud Marketplace](#google-cloud-marketplace) is the one with nothing to pin even in
 principle: its artefacts are held in Google's Producer Portal and a private Artifact Registry.

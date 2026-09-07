@@ -1015,7 +1015,7 @@ Its reach is exactly the rules it carries, and only over statements a test actua
 installs that fixture *and* sends a `sql_text` statement, so nothing asks it the question. The guard
 closes the door on a fixture that lies when asked; it does not interrogate fixtures nobody asks.
 The list stays in this file rather than in `tests/helpers/` until a second engine has a measured
-refusal of its own — the other fourteen provider test files would receive an empty rule list, which
+refusal of its own. The other sixteen provider test files would receive an empty rule list, which
 proves nothing about their fixtures and reads as coverage. That condition is recorded in the list's
 own docblock, where a second engine's implementer will meet it.
 
