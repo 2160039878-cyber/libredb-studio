@@ -65,7 +65,7 @@ Three properties frame everything below, and each of them is load-bearing rather
   editor replay is ever handed the editor's writable pool. **Plan mode grounds itself the same way**
   — the server reads the schema, and on PostgreSQL and SQLite the engine's estimated statistics
   beside it, before the model's first turn — so a plan run is now ordinarily grounded on every engine,
-  including the nine where an agent run cannot read anything at all. What is left of the old engine
+  including the fourteen where an agent run cannot read anything at all. What is left of the old engine
   rule is narrower and still worth stating: the engine no longer decides WHETHER a plan run is
   grounded, only whether it is grounded through a composed statement or through its provider, and
   whether it gets statistics. A run whose reading fails — a provider that cannot describe itself, a
@@ -80,7 +80,7 @@ everything the runtime does **not** do yet is listed under
 
 Two companion pages carry what this one deliberately does not:
 
-- [`docs/AGENT_GUIDE.md`](./AGENT_GUIDE.md) — **the user guide.** What a run is, the three
+- [`docs/AGENT_GUIDE.md`](./AGENT_GUIDE.md) — **the user guide.** What a run is, the five
   workflows, what "answered" means, what the budget meter's numbers are, and how to run the agent on
   a local Ollama model. It describes the surface in the application's own words; this document
   describes the machinery under it.
@@ -1668,7 +1668,7 @@ denial cannot be re-fed to the model as though the SQL were malformed.
 
 ## Supported models
 
-Twelve models run every agent surface. Each cleared all six — Investigate, Optimize, Assess, Operate,
+Twenty-eight models run every agent surface. Each cleared all six — Investigate, Optimize, Assess, Operate,
 Analyze and Plan — five consecutive times, at the turn limit the product ships, which is 30 of 30
 runs.
 
@@ -1694,7 +1694,7 @@ not cover, are all under [`docs/llms/`](llms/README.md).
 
 
 Nothing prevents another model from being configured — the capability probe below decides what any
-given endpoint can do, and there is no allow-list in the code. What the ten have is a measurement.
+given endpoint can do, and there is no allow-list in the code. What the twenty-eight have is a measurement.
 
 ## The model side
 
@@ -2312,14 +2312,15 @@ backend can write there. What was missing was a **default pointing at it**: the 
 environment only through `extraEnv`, so a default `helm install` left `WORKFLOW_LOCAL_DATA_DIR` unset
 and the agent honestly reported itself absent.
 
-The chart supplies that default itself, and it has to — the image cannot yet. `image.tag` defaults to
-the chart's `appVersion`, and the Dockerfile's `WORKFLOW_LOCAL_DATA_DIR` landed **after** the `0.11.0`
-tag that `appVersion` names, so the image a default install pulls today has no such ENV. Leaning on
+The chart supplies that default itself, and it did so before the image could. `image.tag` defaults to
+the chart's `appVersion`, and the Dockerfile's `WORKFLOW_LOCAL_DATA_DIR` landed after the `0.11.0`
+tag, so only an install pinned below that tag lacks the ENV; `appVersion` now names `0.14.1`, whose
+image sets the same path. Leaning on
 the image would have left the ledger resolving to `.workflow-data` under `WORKDIR /app` — read-only —
 and the probe answering `LEDGER_UNAVAILABLE` on an install the chart advertises as working. With the
 chart writing it (verified by rendering `charts/libredb-studio` at its defaults), the agent appears as
 soon as a model is configured, with an ephemeral ledger until `persistence.enabled`. Both places name
-`/app/data/workflow`, so when an image carrying the ENV ships, the two agree.
+`/app/data/workflow`, and the image now carries the ENV as well, so the two agree.
 
 **The chart now says the same thing** (chart `0.1.34`). It carries an `agent` block whose only field
 is the off-switch, and the block's whole design is to write as little as possible:
@@ -2555,7 +2556,7 @@ need a work item to hold that record.
 
 ## Related documentation
 
-- [`docs/AGENT_GUIDE.md`](./AGENT_GUIDE.md) — the user guide: the rail's own vocabulary, the three
+- [`docs/AGENT_GUIDE.md`](./AGENT_GUIDE.md) — the user guide: the rail's own vocabulary, the five
   workflows, what "answered" means, the meter's numbers, and the Ollama path.
 - [`docs/AGENT_DATA_FLOW.md`](./AGENT_DATA_FLOW.md) — what leaves the machine, when, and to which
   provider, written from call sites.
