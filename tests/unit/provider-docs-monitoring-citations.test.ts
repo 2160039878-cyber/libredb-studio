@@ -24,12 +24,11 @@
  * declarations, they are listed in the order the source declares them, both search docs name the
  * same eight, and the docs in scope carry no `:<line>` suffix.
  *
- * SCOPE, deliberately narrow: the whole of `docs/providers/mssql.md` and
- * `docs/providers/trino.md`, plus the monitoring seam of the two search docs and the one
- * `base-provider.ts` citation in `docs/providers/redis.md`. The rest of `docs/providers/` still
- * cites code by line in quantity — a pre-existing backlog this round did not open — and the two
- * search docs are guarded only inside their monitoring section. Nothing here asserts that the
- * uncovered citations are correct; they are simply not measured yet.
+ * SCOPE, deliberately narrow: the whole of every document in `NAMED_CITATIONS`, plus the
+ * monitoring seam of the two search docs. The rest of `docs/providers/` still cites code by line
+ * in quantity — a pre-existing backlog this round did not open — and the two search docs are
+ * guarded only inside their monitoring section. Nothing here asserts that the uncovered
+ * citations are correct; they are simply not measured yet.
  */
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -123,6 +122,23 @@ const NAMED_CITATIONS = [
       "serializeDocument",
       "getSchema",
       "runMaintenance",
+    ],
+  },
+  {
+    doc: "docs/providers/redis.md",
+    source: "src/lib/db/providers/keyvalue/redis.ts",
+    methods: [
+      "getCapabilities",
+      "getLabels",
+      "buildTLSOptions",
+      "executeRedisCommand",
+      "runCommand",
+      "formatResult",
+      "parseInfoResult",
+      "getSchema",
+      "getKeyPrefix",
+      "calculateHitRatio",
+      "getActiveSessions",
     ],
   },
 ] as const;
@@ -221,10 +237,14 @@ describe("provider docs rewritten this round: code cited by name, whole file", (
     });
   }
 
-  test("mssql.md names the factory's entry point rather than a line inside it", () => {
-    expect(read("docs/providers/mssql.md")).toContain(
-      "`createDatabaseProvider()` ([`factory.ts`](../../src/lib/db/factory.ts))",
-    );
+  test("provider docs name the factory's entry point rather than a line inside it", () => {
+    for (const { doc } of NAMED_CITATIONS.filter((citation) =>
+      read(citation.doc).includes("`createDatabaseProvider()`"),
+    )) {
+      expect(read(doc)).toMatch(
+        /`createDatabaseProvider\(\)`\s*\(\[`factory\.ts`\]\(\.\.\/\.\.\/src\/lib\/db\/factory\.ts\)\)/,
+      );
+    }
     expect(read(FACTORY)).toMatch(/^export async function createDatabaseProvider\(/m);
   });
 });
