@@ -19,15 +19,16 @@ Three decisions. The first is the consequential one, which is why it is first.
 
 1. **Does it need a driver at all?** Score the engine against the rubric below. A database with a
    first-class HTTP API can be supported with no dependency at all, and that is worth real effort to
-   establish before you start. Seven shipped type-ids need no driver: SQLite uses the built-in
+   establish before you start. Eight shipped type-ids need no driver: SQLite uses the built-in
    `bun:sqlite`/`node:sqlite` via `sqlite-driver.ts`, and the rest reach the engine over HTTP with
-   nothing but `fetch`/`node:https` — Couchbase over the documented REST endpoints
+   nothing but `fetch`/`node:https`. Couchbase goes over the documented REST endpoints
    ([couchbase.md](./providers/couchbase.md)), ClickHouse over its HTTP interface
    ([clickhouse.md](./providers/clickhouse.md)), Apache Druid over `POST /druid/v2/sql`
    ([druid.md](./providers/druid.md)), Elasticsearch and OpenSearch over their SQL endpoints
    ([elasticsearch.md](./providers/elasticsearch.md) · [opensearch.md](./providers/opensearch.md)),
-   and Apache Trino over its own client protocol
-   ([trino.md](./providers/trino.md)). If it does need one, it will be something like `pg`,
+   Apache Trino over its own client protocol ([trino.md](./providers/trino.md)), and libSQL over the
+   Hrana protocol, `POST /v2/pipeline` ([libsql.md](./providers/libsql.md)). If it does need one, it
+   will be something like `pg`,
    `mysql2`, `mongodb`, `ioredis`, `oracledb` or `mssql`.
 
 2. **Which base class?**
@@ -632,8 +633,8 @@ The `*Global*` triads reach only the card, never the per-table button, and only 
 renders: the analyze card is gated on `analyze`, the vacuum card on the **literal** `vacuum`, the
 reindex card on `reindex`. The `reindexGlobal*` triad is **optional** while the other two are
 required, because `ProviderLabels` is published (`src/exports/types.ts`) and a required field added
-after the fact stops every external implementer compiling; only the three providers that declare the
-`reindex` operation (Postgres, SQLite, Couchbase) set it, and the card keeps its old strings as the
+after the fact stops every external implementer compiling; only the four providers that declare the
+`reindex` operation (Postgres, SQLite, libSQL, Couchbase) set it, and the card keeps its old strings as the
 fallback.
 
 ### PreparedQuery
@@ -822,7 +823,7 @@ The integration points, all of which need an entry. This is the list the Strateg
       so the compiler will at least stop you from *forgetting* that a decision exists
 
 **Published where a human reads it, and this is the block with the fewest gates.** `readme:check`
-compares the translated READMEs against `README.md` and `chart:check` compares versions. Nine of the
+compares the translated READMEs against `README.md` and `chart:check` compares versions. Eleven of the
 catalog files below are now counted as well:
 [`tests/unit/lib/catalog-copy-engine-count.test.ts`](../tests/unit/lib/catalog-copy-engine-count.test.ts)
 walks them, refuses a numeral qualifying "engines" that is not `EXTERNAL_DATABASE_TYPES.length`, and
