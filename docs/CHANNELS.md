@@ -34,15 +34,15 @@ channel count.
 
 ## Coverage snapshot
 
-**36 channels · 30 live · 5 pending · 1 deprecated**
+**36 channels · 31 live · 4 pending · 1 deprecated**
 
-Live channels by platform: **Linux 8 · macOS 3 · Windows 4 · Container 5 · Kubernetes 3 · Cloud 13**
+Live channels by platform: **Linux 8 · macOS 3 · Windows 4 · Container 5 · Kubernetes 4 · Cloud 13**
 
 | Category | Live | Pending | Deprecated |
 | --- | ---: | ---: | ---: |
 | Registries & releases | 2 | 0 | 0 |
 | Containers | 2 | 0 | 0 |
-| Kubernetes & operators | 2 | 1 | 0 |
+| Kubernetes & operators | 3 | 0 | 0 |
 | Package managers | 5 | 0 | 1 |
 | OS / desktop packages | 3 | 0 | 0 |
 | PaaS catalogs (listed) | 9 | 3 | 0 |
@@ -62,8 +62,8 @@ Live channels by platform: **Linux 8 · macOS 3 · Windows 4 · Container 5 · K
 | [Docker image (GHCR)](https://github.com/libredb/libredb-studio/pkgs/container/libredb-studio) | Containers | Container | live | Automated, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |
 | [Docker Hub mirror](https://hub.docker.com/r/libredb/libredb-studio) | Containers | Container | live | Automated, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |
 | [Helm chart](https://artifacthub.io/packages/helm/libredb-studio/libredb-studio) | Kubernetes & operators | Kubernetes | live | Automated, every release | [HELM_CHART.md](HELM_CHART.md) |
+| [OperatorHub / OpenShift](https://operatorhub.io/operator/libredb-studio-operator) | Kubernetes & operators | Kubernetes | live | Manual, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |
 | [Rancher Partner Charts](https://www.suse.com/pcsc/viewVersionPage?versionID=26969) | Kubernetes & operators | Kubernetes | live | Manual, on demand | [DISTRIBUTION.md](DISTRIBUTION.md) |
-| [OperatorHub / OpenShift](https://github.com/redhat-openshift-ecosystem/community-operators-prod) | Kubernetes & operators | Kubernetes | pending | Manual, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |
 | [Chocolatey](https://community.chocolatey.org/packages/libredb-studio) | Package managers | Windows | live | Automated, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |
 | [FlatPark (Flatpak)](https://flatpark.org/) | Package managers | Linux | live | Manual, every release | [packaging/flatpark/README.md](../packaging/flatpark/README.md) |
 | [Homebrew tap](https://github.com/libredb/homebrew-tap) | Package managers | Linux, macOS | live | Automated, every release | [DISTRIBUTION.md](DISTRIBUTION.md) |

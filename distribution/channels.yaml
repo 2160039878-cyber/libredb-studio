@@ -666,7 +666,7 @@ channels:
   - id: operatorhub-community
     name: OperatorHub / OpenShift community operator catalogs
     short_name: OperatorHub / OpenShift
-    status: pending
+    status: live
     category: kubernetes-operators
     platforms: [kubernetes]
     runtime: channel_supplied
@@ -678,14 +678,27 @@ channels:
     links:
       tracking_issue: https://github.com/libredb/libredb-studio/issues/152
       first_pr: https://github.com/redhat-openshift-ecosystem/community-operators-prod/pull/10497
+      catalog: https://operatorhub.io/operator/libredb-studio-operator
       upstream_repo: https://github.com/redhat-openshift-ecosystem/community-operators-prod
       docs: docs/DISTRIBUTION.md
     pin:
-      strategy: local_file
-      files:
-        - operator/bundle/manifests/libredb-studio-operator.clusterserviceversion.yaml
-      extract: 'libredb-studio-operator:(\d+\.\d+\.\d+)'
-      note: The OpenShift console catalog is live at 0.9.59 (community-operators-prod#10497 merged 2026-07-27, FBC catalogs in community-operators-prod#10581); the OperatorHub.io listing (k8s-operatorhub/community-operators#8794) is still in review, so this channel stays pending until both are listed. Catalog submissions (k8s-operatorhub + community-operators-prod) start after the operator PR lands; the committed bundle is the source for both, with community-operators-prod contributed in FBC mode (fbc.enabled plus per-OCP-version catalog_mapping in ci.yaml). FBC releases in two upstream PRs - bundle first, then the rendered catalogs - and that second PR is only bot-created when the bundle directory ships a release-config.yaml, so every release must include one.
+      strategy: probe
+      probe: github-dir-max-version
+      urls:
+        operatorhub-io: https://api.github.com/repos/k8s-operatorhub/community-operators/contents/operators/libredb-studio-operator
+        openshift-console: https://api.github.com/repos/redhat-openshift-ecosystem/community-operators-prod/contents/operators/libredb-studio-operator
+      note: Both catalogs are listed - OpenShift console since 0.9.59 (bundle community-operators-prod#10497
+        merged 2026-07-27, FBC catalogs community-operators-prod#10581), operatorhub.io since
+        k8s-operatorhub/community-operators#8794 merged 2026-09-08. These are the COMMUNITY catalogs, not the
+        Red Hat certified one, so the OpenShift console lists the operator under Community with its
+        unsupported-operator warning. Measured as two directory listings rather than one local file, because
+        the committed bundle is only the submission source - a local pin would have read 0.14.1 while both
+        catalogs still served 0.9.59. Each catalog is bumped by its own upstream PR and the two merge on
+        different days, so a lagging one has to surface as its own disagreeing source. Catalog submissions
+        start once the operator controller image is public on GHCR; community-operators-prod is contributed in
+        FBC mode (fbc.enabled plus per-OCP-version catalog_mapping in ci.yaml). An FBC release is two upstream
+        PRs - bundle first, then the rendered catalogs - and that second PR is only bot-created when the
+        bundle version directory ships a release-config.yaml, so every release must include one.
 
   # ---- Tier 4: partner and curated catalogs (not self-serve) --------------
 
@@ -846,9 +859,9 @@ channels:
       docs: docs/DISTRIBUTION.md
     pin:
       strategy: probe
-      probe: winget-max-version
+      probe: github-dir-max-version
       urls:
-        versions: https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/l/LibreDB/Studio
+        catalog: https://api.github.com/repos/microsoft/winget-pkgs/contents/manifests/l/LibreDB/Studio
       note: Listed since 0.9.59 (winget install LibreDB.Studio). winget publishes no floating "latest"
         document - the contents listing enumerates every published version - so the highest version it
         enumerates is the served state. A regex pin cannot express that (all matches in a source must
