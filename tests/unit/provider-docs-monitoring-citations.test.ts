@@ -163,6 +163,35 @@ const NAMED_CITATIONS = [
       "runMaintenance",
     ],
   },
+  {
+    doc: "docs/providers/clickhouse.md",
+    source: "src/lib/db/providers/sql/clickhouse/index.ts",
+    // Tracks the doc, not a hand-picked subset: every `name(` it cites that index.ts declares as
+    // a class member, in declaration order. Module-level functions (`resolveConnection`) and
+    // inherited SQLBaseProvider members carry no access modifier for `declarationLine` to match.
+    methods: [
+      "getCapabilities",
+      "getLabels",
+      "prepareQuery",
+      "validate",
+      "connect",
+      "disconnect",
+      "query",
+      "mapClickHouseError",
+      "getSchema",
+      "getSchemaList",
+      "getSchemaRelations",
+      "getOverview",
+      "getPerformanceMetrics",
+      "getSlowQueries",
+      "getActiveSessions",
+      "getTableStats",
+      "getIndexStats",
+      "getStorageStats",
+      "getHealth",
+      "runMaintenance",
+    ],
+  },
 ] as const;
 
 const SEARCH_DOCS = ["docs/providers/elasticsearch.md", "docs/providers/opensearch.md"] as const;
