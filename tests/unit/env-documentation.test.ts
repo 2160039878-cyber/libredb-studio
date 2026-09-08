@@ -48,6 +48,8 @@ const ENV_EXAMPLE = readFileSync(path.join(ROOT, ".env.example"), "utf8");
  * the reason it is not operator-facing. Platform- or build-time only.
  */
 const ALLOWLIST: Record<string, string> = {
+  NEXT_PUBLIC_BASE_PATH:
+    "Derived from BASE_PATH by next.config.ts and baked into routes/bundles; not an independent operator setting",
   NODE_ENV: "Set by the runtime and by `next build`, never by an operator.",
   NEXT_RUNTIME: "Injected by Next.js to distinguish the edge and Node runtimes.",
   PORT: "Supplied by the platform (Docker, systemd, the chart), not by `.env`.",

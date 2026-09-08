@@ -189,3 +189,6 @@ deploy/digitalocean/droplet/scripts/99-img-check.sh
 /probe-*.yaml
 /probe-results/
 /probe-results*.json
+
+# Isolated data for the production subpath regression suite.
+data-e2e-base-path/

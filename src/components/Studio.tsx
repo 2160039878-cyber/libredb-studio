@@ -1,5 +1,6 @@
 "use client";
 
+import { appFetch } from "@/lib/config/base-path";
 import React, { useState, useEffect, useRef } from "react";
 import { Sidebar, ConnectionsList } from "@/components/sidebar";
 import { MobileNav } from "@/components/MobileNav";
@@ -397,7 +398,7 @@ export default function Studio() {
 
   const handleDeleteConnection = (id: string) => {
     // Clean up server-side provider cache and close connections/tunnels
-    fetch("/api/db/disconnect", {
+    appFetch("/api/db/disconnect", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ connectionId: id }),

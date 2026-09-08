@@ -638,6 +638,9 @@ Deploy your own instance of LibreDB Studio with a single click on DigitalOcean, 
 
 ## Deployment (DevOps)
 
+For a reverse-proxy path such as `/tools/libredb`, build with `BASE_PATH` and follow the
+[subpath deployment guide](docs/SUBPATH.md). Prebuilt images use the root path.
+
 > Maintainers: every distribution channel is inventoried in
 > [`distribution/channels.yaml`](distribution/channels.yaml); `bun run distribution:check`
 > reports version drift across all of them (see

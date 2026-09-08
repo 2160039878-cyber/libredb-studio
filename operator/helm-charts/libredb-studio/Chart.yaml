@@ -2,7 +2,7 @@ apiVersion: v2
 name: libredb-studio
 description: Web-based SQL IDE for cloud-native teams supporting sixteen engines - PostgreSQL, MySQL, SQLite, DuckDB, Oracle, SQL Server, MongoDB, Redis, Couchbase, ClickHouse, Apache Druid, Elasticsearch, OpenSearch, Apache Trino, Apache Cassandra and libSQL
 type: application
-version: 0.1.61
+version: 0.1.62
 appVersion: "0.15.0"
 kubeVersion: ">=1.26.0-0"
 home: https://github.com/libredb/libredb-studio
@@ -113,13 +113,7 @@ annotations:
     - name: Source
       url: https://github.com/libredb/libredb-studio
   artifacthub.io/changes: |
-    - "The OpenShift operator bundle now reaches both community catalogs on every release. Submissions to operatorhub.io and the OpenShift console catalog were hand-made until now, which is why both sat at 0.9.59 while the product reached 0.14.1 and 0.14.0 was never submitted at all"
-    - "A database size the server declines to measure is reported as absent rather than as 0 bytes, on MySQL, PostgreSQL, SQL Server and Oracle. An unmeasured database no longer reads as an empty one in the Overview panel"
-    - "CREATE TABLE emits the DDL of the engine it is aimed at instead of PostgreSQL's, so the generated statement runs where it was generated"
-    - "Agent grounding no longer captures engine and extension objects, so a run is grounded in the schema the question is about"
-    - "An agent stop that read nothing is answered for whoever stopped it rather than left silent"
-    - "The bundled runtime moves to Bun 1.4.2, with the in-range dependency groups"
-    - "Track app release 0.15.0 (appVersion bump; default image tag follows)"
+    - "Prefix default health probes with config.basePath for images built to run under a subpath"
 dependencies:
   - name: postgresql
     version: "16.x.x"

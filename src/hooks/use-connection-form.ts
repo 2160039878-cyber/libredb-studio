@@ -1,5 +1,6 @@
 "use client";
 
+import { appFetch } from "@/lib/config/base-path";
 import { useState, useCallback } from "react";
 import {
   DatabaseConnection,
@@ -403,7 +404,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       // Platform adapter: use callback instead of fetch
       if (onTestConnection) return await onTestConnection(conn);
 
-      const response = await fetch("/api/db/test-connection", {
+      const response = await appFetch("/api/db/test-connection", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(conn),

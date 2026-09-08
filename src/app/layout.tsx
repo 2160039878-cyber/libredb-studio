@@ -1,3 +1,4 @@
+import { withBasePath } from "@/lib/config/base-path";
 import { GeistMono } from "geist/font/mono";
 // Self-hosted Geist (the `geist` package wraps next/font/local around the woff2
 // files it ships). next/font/google would fetch fonts.googleapis.com at BUILD
@@ -16,11 +17,11 @@ export const metadata: Metadata = {
   description: "Manage PostgreSQL, MySQL, MongoDB, and Redis in one web-based interface.",
   icons: {
     icon: [
-      { url: "/favicon.ico?v=2", sizes: "any" },
-      { url: "/logo.svg?v=2", type: "image/svg+xml" },
+      { url: withBasePath("/favicon.ico?v=2"), sizes: "any" },
+      { url: withBasePath("/logo.svg?v=2"), type: "image/svg+xml" },
     ],
-    shortcut: "/favicon.ico?v=2",
-    apple: "/favicon-32x32.png?v=2",
+    shortcut: withBasePath("/favicon.ico?v=2"),
+    apple: withBasePath("/favicon-32x32.png?v=2"),
   },
 };
 
