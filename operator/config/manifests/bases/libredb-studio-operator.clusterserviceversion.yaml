@@ -104,4 +104,5 @@ spec:
   provider:
     name: LibreDB
     url: https://libredb.org
+  replaces: libredb-studio-operator.v0.0.0
   version: 0.0.0

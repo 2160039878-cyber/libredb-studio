@@ -409,9 +409,9 @@ catalog_templates:
     skipRange: '>=0.0.0 <<version>'
 ```
 
-`skipRange` is what wires the new bundle into the update graph, and it is
-deliberately *not* `replaces` — see
-[The update graph is carried by skipRange, not replaces](#the-update-graph-is-carried-by-skiprange-not-replaces).
+`skipRange` here is the FBC half of the update graph; the CSV also carries a
+`spec.replaces` pointer, which is what the operatorhub.io side requires. See
+[The update graph: replaces, plus skipRange](#the-update-graph-replaces-plus-skiprange).
 Per the pipeline's own schema
 ([`release-config-schema.json`](https://github.com/redhat-openshift-ecosystem/operator-pipelines/blob/main/operatorcert/schemas/release-config-schema.json))
 only `template_name` and `channels` are required; `replaces`, `skips` and
@@ -422,47 +422,42 @@ each *newly added* OpenShift version's catalog) and does not substitute for
 (k8s-operatorhub/community-operators) has no such second step: its
 bundle-directory PR is the whole listing.
 
-### The update graph is carried by skipRange, not replaces
+### The update graph: replaces, plus skipRange
 
-Both catalogs need to know where a new bundle sits relative to the last one, or
-the older bundle becomes *dangling* — reachable from no channel head — which is
-a hard failure of `check_dangling_bundles` in
-[operatorcert](https://github.com/redhat-openshift-ecosystem/operator-pipelines/blob/main/operatorcert/static_tests/community/bundle.py).
-The obvious field for that is `spec.replaces`, and it is the wrong one here:
-its value is *the newest version the catalogs actually serve*, which is not
-derivable from anything in this repo. It lags our releases by however many
-submissions are unmerged (`operatorhub-community` in `distribution/channels.yaml`
-measures exactly that lag), so it would have become a fourth hand-maintained
-version string with no offline gate able to notice it going stale.
+Both catalogs need to know where a new bundle sits relative to the last one.
+Two upstream gates check that, and they do not agree on how it may be expressed, so the bundle carries both fields.
 
-`olm.skipRange` carries the same graph edge and *is* derivable: `make -C
-operator bundle` stamps `>=0.0.0 <$(VERSION)` into the CSV annotations, next to
-the `containerImage` stamp and verified the same way. "Supersede everything
-below me" stays true no matter how many releases go unsubmitted. Upstream reads
-it in `_resolve_skip_range`, which seeds the update graph *before* the
-`replaces`/`skips` pointers are considered, so replaces-mode is satisfied
-without a `replaces` key — and the same range goes in the FBC
-`release-config.yaml`, where the schema accepts it as an alternative to
-`replaces`.
+- **`spec.replaces`** is the one that is actually required.
+  The k8s-operatorhub deploy jobs build a test catalog with `opm index add --mode replaces`, and the mode is read straight from the submission's `ci.yaml` (`Setting index add mode from 'updateGraph' value to 'replaces'` in the job log).
+  That command reads `spec.replaces` and `spec.skips` only.
+  With neither, it prunes the previous bundle out of the channel and the job fails:
+
+  ```
+  add prunes bundle libredb-studio-operator.v0.9.59 ... channel alpha:
+  this may be due to incorrect channel head (...v0.14.1, skips/replaces [])
+  ```
+
+  This is what failed the first 0.14.1 submission.
+  Measured locally against the same command with a local registry and two bundle images:
+  `--mode replaces` with only a skipRange exits 1, with `spec.replaces` exits 0, and `--mode semver` with only a skipRange exits 0.
+- **`olm.skipRange`** (`>=0.0.0 <$(VERSION)`) is kept as well.
+  It lets a cluster jump straight to this version instead of stepping through, it is what the FBC `release-config.yaml` accepts, and it satisfies `check_dangling_bundles` in [operatorcert](https://github.com/redhat-openshift-ecosystem/operator-pipelines/blob/main/operatorcert/static_tests/community/bundle.py), which seeds its graph from `_resolve_skip_range` before it looks at the pointers.
+
+Note the trap in that pair: the static check passes on a skipRange alone, so **a green `check_dangling_bundles` is not evidence that the submission will build.** The binding gate is the deploy job.
+
+`make -C operator bundle` stamps both fields next to the `containerImage` stamp and greps each one back, because sed exits 0 on zero matches and an unparseable skipRange is *ignored with a log warning* rather than rejected.
+`tests/unit/operator-bundle-update-graph.test.ts` asserts both offline.
 
 Three details that are load bearing:
 
-- **The upper bound is exclusive.** `<=$(VERSION)` would put the bundle inside
-  its own skip range.
-- **An unparseable range is ignored, not rejected.** `_resolve_skip_range`
-  catches the parse error and logs `Invalid skipRange: ... is ignored`, so a
-  botched stamp reaches the catalog as "no skipRange at all" and fails there as
-  a dangling bundle. That is why the Makefile greps its own stamp back and why
-  `tests/unit/operator-bundle-update-graph.test.ts` asserts the committed
-  annotation offline. The range is parsed by `semantic_version.NpmSpec`.
-- **Do not switch `updateGraph` to `semver-mode` to avoid all this.** It would
-  also remove the hand-maintained value (the graph is then just the sorted
-  bundle list), but upstream marks the switch as one-way and forbids
-  `spec.replaces` under it, which would permanently cost us the ability to
-  publish a leaf or out-of-order bundle. Note also that the prose docs call
-  `semver-mode` the default while the implementation defaults to
-  `replaces-mode` (`config.get("updateGraph", "replaces-mode")`), so the mode
-  stays written out explicitly in each submission's `ci.yaml`.
+- **`CATALOG_REPLACES` in `operator/Makefile` is hand-maintained, and has to be.** Its value is the newest version the catalogs actually serve, which is not derivable from `package.json`: it lags our releases by however many submissions are unmerged, and 0.14.0 was never submitted at all.
+  The `operatorhub-community` row of `bun run distribution:check` is what measures that lag.
+  Bump it when a submission merges upstream.
+  Forgetting is loud rather than silent, because the next submission fails upstream with the same prune error.
+- **The skipRange upper bound is exclusive.** `<=$(VERSION)` would put the bundle inside its own skip range.
+- **Do not switch `updateGraph` to `semver-mode` to avoid the pointer.** It works (measured above) and it would remove the hand-maintained value, since the graph becomes the sorted bundle list.
+  But upstream marks the switch as one-way and forbids `spec.replaces` under it, which would permanently cost us the ability to publish a leaf or out-of-order bundle.
+  The prose docs also call `semver-mode` the default while the implementation defaults to `replaces-mode` (`config.get("updateGraph", "replaces-mode")`), so the mode stays written out explicitly in each submission's `ci.yaml`.
 
 ## npx
 
