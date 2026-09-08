@@ -406,15 +406,63 @@ bundle PR as `operators/libredb-studio-operator/<version>/release-config.yaml`:
 catalog_templates:
   - template_name: basic.yaml
     channels: [alpha]
-    replaces: libredb-studio-operator.v<previous version>
+    skipRange: '>=0.0.0 <<version>'
 ```
 
-`replaces` wires the new bundle into the update graph and is omitted only for
-a first submission. `version_promotion_strategy` in `ci.yaml` is a separate
-knob (promotion into each *newly added* OpenShift version's catalog) and does
-not substitute for `release-config.yaml`. The operatorhub.io submission
+`skipRange` is what wires the new bundle into the update graph, and it is
+deliberately *not* `replaces` — see
+[The update graph is carried by skipRange, not replaces](#the-update-graph-is-carried-by-skiprange-not-replaces).
+Per the pipeline's own schema
+([`release-config-schema.json`](https://github.com/redhat-openshift-ecosystem/operator-pipelines/blob/main/operatorcert/schemas/release-config-schema.json))
+only `template_name` and `channels` are required; `replaces`, `skips` and
+`skipRange` are all optional and all apply to `basic` templates only.
+`version_promotion_strategy` in `ci.yaml` is a separate knob (promotion into
+each *newly added* OpenShift version's catalog) and does not substitute for
+`release-config.yaml`. The operatorhub.io submission
 (k8s-operatorhub/community-operators) has no such second step: its
 bundle-directory PR is the whole listing.
+
+### The update graph is carried by skipRange, not replaces
+
+Both catalogs need to know where a new bundle sits relative to the last one, or
+the older bundle becomes *dangling* — reachable from no channel head — which is
+a hard failure of `check_dangling_bundles` in
+[operatorcert](https://github.com/redhat-openshift-ecosystem/operator-pipelines/blob/main/operatorcert/static_tests/community/bundle.py).
+The obvious field for that is `spec.replaces`, and it is the wrong one here:
+its value is *the newest version the catalogs actually serve*, which is not
+derivable from anything in this repo. It lags our releases by however many
+submissions are unmerged (`operatorhub-community` in `distribution/channels.yaml`
+measures exactly that lag), so it would have become a fourth hand-maintained
+version string with no offline gate able to notice it going stale.
+
+`olm.skipRange` carries the same graph edge and *is* derivable: `make -C
+operator bundle` stamps `>=0.0.0 <$(VERSION)` into the CSV annotations, next to
+the `containerImage` stamp and verified the same way. "Supersede everything
+below me" stays true no matter how many releases go unsubmitted. Upstream reads
+it in `_resolve_skip_range`, which seeds the update graph *before* the
+`replaces`/`skips` pointers are considered, so replaces-mode is satisfied
+without a `replaces` key — and the same range goes in the FBC
+`release-config.yaml`, where the schema accepts it as an alternative to
+`replaces`.
+
+Three details that are load bearing:
+
+- **The upper bound is exclusive.** `<=$(VERSION)` would put the bundle inside
+  its own skip range.
+- **An unparseable range is ignored, not rejected.** `_resolve_skip_range`
+  catches the parse error and logs `Invalid skipRange: ... is ignored`, so a
+  botched stamp reaches the catalog as "no skipRange at all" and fails there as
+  a dangling bundle. That is why the Makefile greps its own stamp back and why
+  `tests/unit/operator-bundle-update-graph.test.ts` asserts the committed
+  annotation offline. The range is parsed by `semantic_version.NpmSpec`.
+- **Do not switch `updateGraph` to `semver-mode` to avoid all this.** It would
+  also remove the hand-maintained value (the graph is then just the sorted
+  bundle list), but upstream marks the switch as one-way and forbids
+  `spec.replaces` under it, which would permanently cost us the ability to
+  publish a leaf or out-of-order bundle. Note also that the prose docs call
+  `semver-mode` the default while the implementation defaults to
+  `replaces-mode` (`config.get("updateGraph", "replaces-mode")`), so the mode
+  stays written out explicitly in each submission's `ci.yaml`.
 
 ## npx
 
