@@ -63,7 +63,7 @@ DatabaseProvider (interface) → BaseDatabaseProvider → SQLBaseProvider → MS
 [`sql-base.ts`](../../src/lib/db/providers/sql/sql-base.ts) (see
 [PostgreSQL doc §2.2](./postgres.md#22-what-sqlbaseprovider-provides)) and **overrides**
 `getCapabilities()`, `getLabels()`, `escapeIdentifier()` (bracket quoting), and `prepareQuery()`
-(T-SQL pagination). Bind placeholders are `@p1`, `@p2`, … (`getPlaceholder()` from the base).
+(T-SQL pagination). Bind placeholders are `@p1`, `@p2`, ….
 
 ### Registration
 

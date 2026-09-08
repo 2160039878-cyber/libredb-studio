@@ -469,7 +469,7 @@ proving each statement had landed:
 `autoCommit: true` on the call is load-bearing, not decoration: `oracledb.autoCommit` defaults to
 `false`, and measured without it the `INSERT` still reported `rowsAffected: 1` while a second
 session saw `COUNT(*) = 0`, and the row was gone for good once the writing connection went back to
-the pool. Bind parameters use Oracle's `:1`-style placeholders (`getPlaceholder()` from the base).
+the pool. Bind parameters use Oracle's `:1`-style placeholders.
 Native errors are normalised through `mapDatabaseError()` (see [§11](#11-error-handling)).
 
 ### 5.2 Query cancellation

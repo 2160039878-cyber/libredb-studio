@@ -124,10 +124,13 @@ the case [`docs/ADDING_A_PROVIDER.md`](../ADDING_A_PROVIDER.md) names ClickHouse
 |---|---|
 | `escapeIdentifier()` | Double-quoted, since `this.type` (`druid`) falls through to the default branch — the same quoting PostgreSQL uses, and correct here: `SELECT "id" FROM "libredb_demo"` parses. Quoting is not optional in generated SQL — see the reserved-word trap in [§5.4](#54-dialect-traps-a-user-will-hit) |
 | `buildLimitClause()` | `LIMIT n` / `LIMIT n OFFSET m`, both accepted by Druid |
-| `getPlaceholder()` | Returns `?`, which is exactly what Druid's positional parameters use ([§3.10](#310-positional-parameters-really-execute)) |
 | `shouldEnableSSL()` | Inherited but **never called**, deliberately. It infers TLS from substrings in the host name, which would silently switch a self-hosted cluster whose hostname merely contains one. TLS here comes from the connection's own `ssl` config only ([§4.3](#43-tls)) |
 | `prepareQuery()` (base) | The shared query limiter; `DruidProvider` calls it first and only overrides the `OFFSET`-with-no-`LIMIT` case |
 | `getLabels()` (base) | Everything but the two entity labels and the slow-query empty state ([§9](#9-capabilities--labels)) |
+
+Not in the list: a placeholder helper. `SQLBaseProvider` no longer has one (#304 removed it).
+Positional `?` still binds via `query(sql, params)`
+([§3.10](#310-positional-parameters-really-execute)).
 
 ### 2.4 Registration & lifecycle
 
@@ -558,7 +561,7 @@ throws on positional ones — Druid takes `?` placeholders with a typed paramete
 -> [["c"],[20]]
 ```
 
-So `query(sql, params)` binds rather than refuses, and `getPlaceholder()` needs no override. The
+So `query(sql, params)` binds rather than refuses. The
 mapping:
 
 | JS value | Druid parameter type | Note |
