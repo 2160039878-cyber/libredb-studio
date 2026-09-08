@@ -251,9 +251,9 @@ export function readOperatorEntries(operatorDir) {
     }
     const parent = path.dirname(operatorDir);
     if (!fs.statSync(parent, { throwIfNoEntry: false })?.isDirectory()) {
-      throw new Error(
-        `${parent} is not a directory: this is not a catalog checkout, or its layout changed upstream`,
-      );
+      throw new Error(`${parent} is not a directory: this is not a catalog checkout, or its layout changed upstream`, {
+        cause: error,
+      });
     }
     return null;
   }
