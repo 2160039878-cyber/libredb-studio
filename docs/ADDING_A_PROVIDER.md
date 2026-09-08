@@ -32,9 +32,9 @@ Three decisions. The first is the consequential one, which is why it is first.
    `mysql2`, `mongodb`, `ioredis`, `oracledb` or `mssql`.
 
 2. **Which base class?**
-   - **SQL databases → extend `SQLBaseProvider`.** It is
-     [153 lines](../src/lib/db/providers/sql/sql-base.ts) of pure SQL text helpers keyed off
-     `this.type` — identifier and string escaping, `LIMIT` clause building, placeholder style,
+   - **SQL databases → extend `SQLBaseProvider`.**
+     [`sql-base.ts`](../src/lib/db/providers/sql/sql-base.ts) is pure SQL text helpers keyed off
+     `this.type` — identifier and string escaping, `LIMIT` clause building,
      read-only and DDL detection — plus a `prepareQuery()` that applies the shared query limiter.
      None of it touches a pool, a driver or a connection, so **an HTTP transport is no reason to
      avoid it.** A standard-SQL engine reached over HTTP, such as ClickHouse, Apache Druid or Apache Trino,
@@ -259,9 +259,16 @@ for worked, code-verified examples see each provider's **Design decisions** sect
 |--------|-------------|
 | `escapeIdentifier()` | `"table_name"` (PostgreSQL/SQLite) or `` `table_name` `` (MySQL) |
 | `buildLimitClause()` | `LIMIT 50 OFFSET 10` |
-| `positionalPlaceholder()` ([`src/lib/sql/values.ts`](../src/lib/sql/values.ts), not inherited) | `$1` (PostgreSQL, Couchbase), `?` (MySQL, SQLite, Druid), `:1` (Oracle), `@p1` (SQL Server), `null` where the engine has no positional form |
 | `shouldEnableSSL()` | Auto-detects cloud providers |
 | `prepareQuery()` | Automatically injects LIMIT into SELECT queries |
+
+Not in the list: a placeholder helper. `SQLBaseProvider` no longer has one (#304 removed it).
+
+### Positional placeholders (shared module, not inherited)
+
+| Function | What it does |
+|----------|-------------|
+| `positionalPlaceholder()` ([`src/lib/sql/values.ts`](../src/lib/sql/values.ts), not inherited) | `$1` (PostgreSQL, Couchbase), `?` (MySQL, SQLite, Druid), `:1` (Oracle), `@p1` (SQL Server), `null` where the engine has no positional form |
 
 ## Step 3: Register in the Factory
 

@@ -28,7 +28,7 @@
 
 MySQL is a relational database and maps onto the `DatabaseProvider` interface much like PostgreSQL.
 It extends the shared `SQLBaseProvider` (identifier quoting with backticks, automatic `LIMIT`
-injection, `?` placeholders, cloud SSL auto-detection) and layers MySQL-specific introspection and
+injection, cloud SSL auto-detection) and layers MySQL-specific introspection and
 monitoring on top of `mysql2`.
 
 The most useful way to read this doc is **as a diff against the [PostgreSQL provider](./postgres.md)**,

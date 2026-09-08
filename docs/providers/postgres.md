@@ -39,7 +39,7 @@ introspection and monitoring fast, safely, and resiliently**:
   (`pg_stat_statements`) or superuser-only views (WAL) are unavailable.
 
 PostgreSQL is also the **canonical SQL provider**: the shared SQL mechanics (identifier quoting,
-`LIMIT` injection, dialect placeholders, SSL auto-detection) live in `SQLBaseProvider`, and the
+`LIMIT` injection, SSL auto-detection) live in `SQLBaseProvider`, and the
 other SQL providers (MySQL, SQLite, Oracle, SQL Server) follow the patterns established here.
 
 ---
@@ -80,10 +80,17 @@ rather than reimplementing them:
 | Member | Purpose |
 |--------|---------|
 | `escapeIdentifier()` ([`sql-base.ts`](../../src/lib/db/providers/sql/sql-base.ts)) | Dialect-aware quoting — `"ident"` for Postgres, `` `ident` `` for MySQL, `[ident]` for MSSQL; doubles embedded quote chars |
-| `positionalPlaceholder()` ([values.ts](../../src/lib/sql/values.ts), shared rather than inherited) | `$1`-style placeholders for Postgres (`?` for MySQL/SQLite/Druid, `:n` Oracle, `@pn` MSSQL, `$n` Couchbase) |
 | `shouldEnableSSL()` ([`sql-base.ts`](../../src/lib/db/providers/sql/sql-base.ts)) | Auto-enables SSL for known cloud hosts (supabase, neon, render, planetscale, aws, azure, gcp, …) |
 | `getDefaultSchema()` ([`sql-base.ts`](../../src/lib/db/providers/sql/sql-base.ts)) | `public` for Postgres |
 | `prepareQuery()` ([`sql-base.ts`](../../src/lib/db/providers/sql/sql-base.ts)) | Injects `LIMIT` into bare `SELECT`s — see [§5.2](#52-automatic-limit-injection) |
+
+`SQLBaseProvider` no longer has a placeholder helper (#304 removed it).
+
+### 2.2.1 Positional placeholders (shared module, not inherited)
+
+| Function | Purpose |
+|----------|---------|
+| `positionalPlaceholder()` ([values.ts](../../src/lib/sql/values.ts), shared rather than inherited) | `$1`-style placeholders for Postgres (`?` for MySQL/SQLite/Druid, `:n` Oracle, `@pn` MSSQL, `$n` Couchbase) |
 
 ### 2.3 Registration & lifecycle
 
