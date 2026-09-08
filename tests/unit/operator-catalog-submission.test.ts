@@ -437,6 +437,10 @@ describe("CLI", () => {
     roots.push(root);
     const dir = join(root, "operators", OPERATOR);
     if (entries === null) {
+      // The operator leaf is absent but the catalog layout is intact, which is
+      // what a genuine first listing looks like. Skipping the parent here
+      // would model a broken checkout instead.
+      mkdirSync(join(root, "operators"), { recursive: true });
       return dir;
     }
     mkdirSync(dir, { recursive: true });
@@ -714,6 +718,53 @@ describe("CLI", () => {
     ]);
     expect(theirs.stdout).toContain("enabled=false");
     expect(theirs.stdout).toMatch(/reason=.*0\.14\.1 \(#8\)/);
+  });
+
+  test("fails when the catalog layout itself is missing, not just the operator", async () => {
+    // readdir raises ENOENT for a missing PARENT too, so "operators/ is gone"
+    // and "this operator has no directory yet" arrive as the same error. Only
+    // the second is a manual first listing; reading the first that way would
+    // green-skip every release after an upstream rename.
+    const root = mkdtempSync(join(tmpdir(), "nolayout-"));
+    roots.push(root);
+    const result = await run([
+      "decide",
+      "--version",
+      "0.14.1",
+      "--operator-dir",
+      join(root, "operators", OPERATOR),
+      "--repo",
+      "a/b",
+      "--fork",
+      FORK,
+      "--api-base",
+      apiServing([], 500),
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toMatch(/operators/);
+    expect(result.stdout).not.toContain("first submission is manual");
+  });
+
+  test("still reports a genuinely unlisted operator as a manual first listing", async () => {
+    // The control for the test above: the parent exists, the leaf does not.
+    const root = mkdtempSync(join(tmpdir(), "nooperator-"));
+    roots.push(root);
+    mkdirSync(join(root, "operators"), { recursive: true });
+    const result = await run([
+      "decide",
+      "--version",
+      "0.14.1",
+      "--operator-dir",
+      join(root, "operators", OPERATOR),
+      "--repo",
+      "a/b",
+      "--fork",
+      FORK,
+      "--api-base",
+      apiServing([], 500),
+    ]);
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/first submission is manual/);
   });
 
   test("fails when the search response is not the expected shape", async () => {

@@ -26,6 +26,7 @@
  */
 
 import fs from "node:fs";
+import path from "node:path";
 
 /** Bare `x.y.z` only. Our operator versions are app versions, which carry no prerelease suffix. */
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
@@ -231,19 +232,30 @@ export function withReplaces(csvText, replacesName) {
  * Directory entries of a checked-out catalog's operator dir, or null when the
  * operator genuinely has no directory there.
  *
- * ONLY a missing path is null. Anything else - a path that is not a directory,
- * an unreadable one, a changed upstream layout - is thrown, because reporting
- * it as "not listed, the first submission is manual" would stop submitting
- * for good while every run stayed green.
+ * ONLY a missing leaf inside a catalog that otherwise looks right is null.
+ * Anything else - a path that is not a directory, an unreadable one, a changed
+ * upstream layout - is thrown, because reporting it as "not listed, the first
+ * submission is manual" would stop submitting for good while every run stayed
+ * green.
+ *
+ * The parent is checked because readdir raises ENOENT for a missing parent
+ * too: "operators/ is gone" and "this operator has no directory yet" arrive as
+ * the same error, and only the second one is a manual first listing.
  */
 export function readOperatorEntries(operatorDir) {
   try {
     return fs.readdirSync(operatorDir);
   } catch (error) {
-    if (error.code === "ENOENT") {
-      return null;
+    if (error.code !== "ENOENT") {
+      throw error;
     }
-    throw error;
+    const parent = path.dirname(operatorDir);
+    if (!fs.statSync(parent, { throwIfNoEntry: false })?.isDirectory()) {
+      throw new Error(
+        `${parent} is not a directory: this is not a catalog checkout, or its layout changed upstream`,
+      );
+    }
+    return null;
   }
 }
 
