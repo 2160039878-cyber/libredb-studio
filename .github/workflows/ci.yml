@@ -556,8 +556,11 @@ jobs:
     # run is yours, Actions secrets come back, and the analysis is both
     # possible and wanted. PR #394 is the worked example - red while Dependabot
     # owned it, green on the very next human push to the same branch.
+    # The SonarCloud project belongs to the canonical repository; fork-owned
+    # runs cannot authenticate to it, including pushes and fork-local PRs.
     if: >-
-      github.actor != 'dependabot[bot]'
+      github.repository == 'libredb/libredb-studio'
+      && github.actor != 'dependabot[bot]'
       && (github.event.pull_request.head.repo.full_name == github.repository
         || github.event_name == 'push')
     runs-on: ubuntu-latest
