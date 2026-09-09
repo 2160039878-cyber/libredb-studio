@@ -573,7 +573,7 @@ bun run test:coverage
 
 - **Test runner**: `bun:test` (built-in, Jest-compatible API) with `happy-dom` for DOM environment
 - **Component isolation**: Component tests run in 6 isolated groups via `tests/run-components.sh` to prevent `mock.module()` cross-contamination
-- **E2E**: Playwright with Chromium, runs against a production build (`bun run build && bun start`)
+- **E2E**: Playwright runs the full suite on Chromium and the `security-headers` spec on WebKit (`webkit-security`), against a production build (`bun run build && bun start`)
 - **CI**: GitHub Actions runs lint + typecheck + build, unit/integration tests with coverage, E2E tests, and SonarCloud analysis
 - **Coverage**: `bun test --coverage` generates lcov reports for SonarCloud integration
 
@@ -925,10 +925,10 @@ extraEnvFrom:
 
 ### Cross-browser testing
 
-The product is a browser application, so a browser bug is a product bug. CI runs Playwright against
-desktop Chromium, which is the limit of what a headless runner sees: Safari and older WebKit
-regressions, mobile layout, and the WebKitGTK engine behind the Linux desktop build need real
-devices. This project is tested with BrowserStack.
+The product is a browser application, so a browser bug is a product bug. CI runs the full Playwright
+suite on desktop Chromium and the `security-headers` spec on WebKit (`webkit-security`). Beyond that
+one WebKit spec, Safari and older WebKit regressions, mobile layout, and the WebKitGTK engine behind
+the Linux desktop build need real devices. This project is tested with BrowserStack.
 
 ---
 
@@ -966,10 +966,10 @@ one covers and what attribution is owed in return are at
   usable without an account. Since 2026-09-01.
 
 - **[BrowserStack](https://www.browserstack.com/opensource)** — the BrowserStack
-  Open Source programme behind the cross-browser testing that runs Playwright
-  against desktop Chromium, which is the limit of what a headless runner sees:
-  Safari and older WebKit regressions, mobile layout, and the WebKitGTK engine
-  behind the Linux desktop build need real devices. Since 2026-08-31.
+  Open Source programme behind the cross-browser testing that runs the full Playwright
+  suite on desktop Chromium and the `security-headers` spec on WebKit (`webkit-security`).
+  Beyond that one WebKit spec, Safari and older WebKit regressions, mobile layout, and the
+  WebKitGTK engine behind the Linux desktop build need real devices. Since 2026-08-31.
 
 - **[Tailscale](https://tailscale.com/opensource)** — the Community on GitHub
   plan behind the private network maintainers use to reach the database probe
