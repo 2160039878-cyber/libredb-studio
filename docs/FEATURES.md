@@ -9,8 +9,9 @@
 *   **Custom DB Theme:** Specialized `db-dark` theme for high-contrast SQL syntax highlighting.
 *   **Power Snippets:** Integrated templates for CTEs, Joins, and complex CRUD operations.
 *   **Modern Editor Specs:** Font ligatures, smooth scrolling, bracket pair colorization, and parameter hints enabled.
-*   **Keyboard Shortcuts:** `Cmd/Ctrl + Enter` to execute, `Alt + Shift + F` to format.
+*   **Keyboard Shortcuts:** `Cmd/Ctrl + Enter` to execute, `Alt + Shift + F` to format, and `Ctrl + Alt + Shift + N` / `Cmd + Option + Shift + N` to open a new query tab. The new-tab button also shows its shortcut; in embedded workspaces it applies to the workspace receiving keyboard input.
 *   **Command Palette:** Quick access to tables, connections, saved queries, and actions with `Cmd/Ctrl+K`.
+*   **Shortcut Guide:** Press `?` outside text fields, choose "Keyboard shortcuts" in the command palette, or use the Data Profiler's keyboard button. The guide lists app and query-editor bindings and their scope; it is also available in embedded workspaces.
 
 > See [`docs/editor/`](editor/) for the editor internals — completion provider, alias resolution, and performance design.
 

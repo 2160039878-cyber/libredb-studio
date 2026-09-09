@@ -631,6 +631,12 @@ describe("Studio", () => {
     expect(palette.textContent).toBe("CommandPalette");
   });
 
+  test("opens keyboard shortcuts from the command palette", () => {
+    const { getByRole } = render(<Studio />);
+    act(() => (capturedCommandPaletteProps.onShowShortcuts as () => void)());
+    expect(getByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeNull();
+  });
+
   test("connection modal hidden by default", () => {
     const { queryByTestId } = render(<Studio />);
     const modal = queryByTestId("connection-modal");

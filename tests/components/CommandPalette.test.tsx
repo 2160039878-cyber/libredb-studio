@@ -145,6 +145,18 @@ describe("CommandPalette", () => {
     expect(queryByText("Run Query")).not.toBeNull();
   });
 
+  test("offers the keyboard shortcuts guide only when its action is supplied", async () => {
+    const onShowShortcuts = mock(() => {});
+    const props = createDefaultProps();
+    const { queryByText, getByText, rerender } = render(<CommandPalette {...props} />);
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    expect(queryByText("Keyboard shortcuts")).toBeNull();
+    rerender(<CommandPalette {...props} onShowShortcuts={onShowShortcuts} />);
+    fireEvent.click(getByText("Keyboard shortcuts"));
+    await waitFor(() => expect(onShowShortcuts).toHaveBeenCalledTimes(1));
+    expect(queryByText("Run Query")).toBeNull();
+  });
+
   test("shows connections when dialog is open", () => {
     const props = createDefaultProps();
     const { queryByText } = render(<CommandPalette {...props} />);

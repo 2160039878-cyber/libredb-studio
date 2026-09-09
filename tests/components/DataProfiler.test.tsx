@@ -109,6 +109,29 @@ describe("DataProfiler", () => {
     expect(view.queryByText("Data Profiler")).not.toBeNull();
   });
 
+  test("opens keyboard shortcuts with ? and closes the guide before the profiler", async () => {
+    const props = createDefaultProps();
+    const { getByRole, queryByRole } = render(<DataProfiler {...props} />);
+    fireEvent.keyDown(document, { key: "?", shiftKey: true });
+    expect(getByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(queryByRole("dialog", { name: "Keyboard shortcuts" })).toBeNull());
+    expect(props.onClose).not.toHaveBeenCalled();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test("offers a shortcuts button and resets the guide when the profiler closes", () => {
+    const props = createDefaultProps();
+    const { getByRole, queryByRole, rerender } = render(<DataProfiler {...props} />);
+    fireEvent.click(getByRole("button", { name: "Keyboard shortcuts" }));
+    expect(getByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeNull();
+    rerender(<DataProfiler {...props} isOpen={false} />);
+    expect(queryByRole("dialog", { name: "Keyboard shortcuts" })).toBeNull();
+    rerender(<DataProfiler {...props} />);
+    expect(queryByRole("dialog", { name: "Keyboard shortcuts" })).toBeNull();
+  });
+
   // ── Shows table name in title ─────────────────────────────────────────────
 
   test("shows table name in title area", () => {
@@ -160,7 +183,7 @@ describe("DataProfiler", () => {
     const { container } = render(<DataProfiler {...props} />);
 
     // The close button is in the header with text-fg-muted token
-    const closeButton = container.querySelector("button.text-fg-muted");
+    const closeButton = container.querySelector('button[aria-label="Close data profiler"]');
     expect(closeButton).not.toBeNull();
 
     fireEvent.click(closeButton!);

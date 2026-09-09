@@ -30,7 +30,7 @@ FAIL=0
 # green summary line reported a group count no run had.
 # Drifted again before this line was touched: it read 30 while 32 `run_group` calls
 # existed, so every green run reported a group count no run had. 33 is the grep below.
-TOTAL_GROUPS=34
+TOTAL_GROUPS=35
 EXTRA_BUN_ARGS=("$@")
 GROUP_INDEX=0
 COVERAGE_MODE=0
@@ -269,7 +269,6 @@ run_group "Group 15/16: Remaining components" \
   tests/components/CommandPalette.test.tsx \
   tests/components/ResultsGrid.test.tsx \
   tests/components/SchemaDiagram.test.tsx \
-  tests/components/DataProfiler.test.tsx \
   tests/components/schema-explorer/SchemaExplorer.test.tsx \
   tests/components/schema-explorer/ColumnList.test.tsx \
   tests/components/sidebar/ConnectionItem.test.tsx \
@@ -285,6 +284,11 @@ run_group "Group 15/16: Remaining components" \
   tests/components/monitoring/QueriesTab.test.tsx \
   tests/components/monitoring/PerformanceTab.test.tsx \
   tests/components/monitoring/OverviewTab.test.tsx
+
+# Shortcut dialogs need real Radix focus/Escape behavior, not ConnectionModal's UI mock.
+run_group "Keyboard shortcuts and DataProfiler" \
+  tests/components/KeyboardShortcutsDialog.test.tsx \
+  tests/components/DataProfiler.test.tsx
 
 # Group 18: ui/resizable (isolated — installs a global DOMRect that
 #           react-resizable-panels 4 needs, and is the one suite that renders

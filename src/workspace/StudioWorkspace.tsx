@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Sidebar } from "@/components/sidebar";
 // MobileNav and mobile tab panels excluded in embedded mode — platform provides its own navigation
 import { QueryEditor, QueryEditorRef } from "@/components/QueryEditor";
+import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { DataImportModal } from "@/components/DataImportModal";
 import { QuerySafetyDialog } from "@/components/QuerySafetyDialog";
 import { DataProfiler } from "@/components/DataProfiler";
@@ -224,6 +225,7 @@ export function StudioWorkspace({
   const [savedKey, setSavedKey] = useState(0);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [profilerTable, setProfilerTable] = useState<string | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [codeGenTable, setCodeGenTable] = useState<string | null>(null);
   const [testDataTable, setTestDataTable] = useState<string | null>(null);
 
@@ -574,6 +576,7 @@ export function StudioWorkspace({
       </AlertDialog>
 
       {/* Mobile Navigation — hidden in embedded mode, platform provides its own */}
+      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} enabled={!profilerTable} />
     </div>
   );
 }

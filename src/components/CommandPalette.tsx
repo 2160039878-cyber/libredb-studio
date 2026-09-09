@@ -23,6 +23,7 @@ import {
   Bot,
   TextAlignStart,
   Save,
+  Keyboard,
 } from "lucide-react";
 import { DatabaseConnection, TableSchema, SavedQuery, QueryHistoryItem } from "@/lib/types";
 import { storage } from "@/lib/storage";
@@ -53,6 +54,7 @@ interface CommandPaletteProps {
    */
   onAskAgent?: () => void;
   onLogout: () => void;
+  onShowShortcuts?: () => void;
 }
 
 export function CommandPalette({
@@ -72,6 +74,7 @@ export function CommandPalette({
   onSaveQuery,
   onAskAgent,
   onLogout,
+  onShowShortcuts,
 }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
 
@@ -112,6 +115,13 @@ export function CommandPalette({
 
         {/* Quick Actions */}
         <CommandGroup heading="Actions">
+          {onShowShortcuts && (
+            <CommandItem onSelect={() => runAction(onShowShortcuts)}>
+              <Keyboard strokeWidth={1.5} className="w-3.5 h-3.5 text-fg-tertiary" />
+              <span>Keyboard shortcuts</span>
+              <CommandShortcut>?</CommandShortcut>
+            </CommandItem>
+          )}
           <CommandItem onSelect={() => runAction(onExecuteQuery)}>
             <Play strokeWidth={1.5} className="w-3.5 h-3.5 text-hue-blue" />
             <span>Run Query</span>

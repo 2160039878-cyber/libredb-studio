@@ -2,7 +2,8 @@
 
 import { appFetch } from "@/lib/config/base-path";
 import { useState, useEffect, useMemo } from "react";
-import { LoaderCircle, ChartColumn, X, Hash, CircleAlert, Sparkles, Lock } from "lucide-react";
+import { LoaderCircle, ChartColumn, X, Hash, CircleAlert, Sparkles, Lock, Keyboard } from "lucide-react";
+import { KeyboardShortcutsDialog } from "@/components/KeyboardShortcutsDialog";
 import { cn } from "@/lib/utils";
 import { TableSchema, DatabaseConnection } from "@/lib/types";
 import { detectSensitiveColumns, maskValue } from "@/lib/data-masking";
@@ -57,6 +58,7 @@ export function DataProfiler({
   const [aiSummary, setAiSummary] = useState("");
   const [isAiLoading, setIsAiLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   // Detect sensitive columns for masking sample values in profiler
   const sensitiveColumnNames = useMemo(() => {
@@ -165,6 +167,7 @@ export function DataProfiler({
       setProfile(null);
       setAiSummary("");
       setError(null);
+      setShortcutsOpen(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, tableName]);
@@ -216,6 +219,15 @@ export function DataProfiler({
             <span className="text-xs font-medium text-fg shrink-0">Data Profiler</span>
             <span className="text-xs text-fg-muted font-mono truncate">{tableName}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => setShortcutsOpen(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+            className="ml-auto shrink-0 p-1 rounded hover:bg-fill text-fg-muted"
+          >
+            <Keyboard strokeWidth={1.5} className="w-3.5 h-3.5" />
+          </button>
           <button
             onClick={onClose}
             aria-label="Close data profiler"
@@ -389,6 +401,7 @@ export function DataProfiler({
           )}
         </div>
       </div>
+      <KeyboardShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>
   );
 }

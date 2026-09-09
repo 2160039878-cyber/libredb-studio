@@ -115,6 +115,121 @@ describe("StudioTabBar", () => {
     expect(onAddTab).toHaveBeenCalledTimes(1);
   });
 
+  describe("new tab shortcut", () => {
+    const shortcut = { key: "N", code: "KeyN", ctrlKey: true, altKey: true, shiftKey: true };
+    const keyDown = (target: Node, init: KeyboardEventInit) => {
+      const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      fireEvent(target, event);
+      return event;
+    };
+
+    test("uses Ctrl/Command+Alt+Shift+N and exposes the binding on the button", () => {
+      const props = createDefaultProps();
+      const { getByRole } = render(<StudioTabBar {...props} />);
+      const button = getByRole("button", { name: "New tab" });
+      expect(button.title).toBe("New tab (Ctrl+Alt+Shift+N / ⌘+Option+Shift+N)");
+      expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+Alt+Shift+N Meta+Alt+Shift+N");
+
+      for (const modifier of [
+        { ctrlKey: true, key: "n" },
+        { metaKey: true, key: "Dead" },
+      ]) {
+        const event = keyDown(document, {
+          ...modifier,
+          code: "KeyN",
+          altKey: true,
+          shiftKey: true,
+        });
+        expect(event.defaultPrevented).toBe(true);
+      }
+      expect(props.onAddTab).toHaveBeenCalledTimes(2);
+    });
+
+    test("leaves browser shortcuts, typing, repeats and composition untouched", () => {
+      const props = createDefaultProps();
+      render(<StudioTabBar {...props} />);
+      for (const binding of [
+        { code: "KeyN" },
+        { code: "KeyN", ctrlKey: true },
+        { code: "KeyT", metaKey: true },
+        { code: "KeyN", ctrlKey: true, shiftKey: true },
+        { code: "KeyN", altKey: true },
+        { code: "KeyN", metaKey: true, altKey: true },
+        { ...shortcut, code: "KeyT" },
+        { ...shortcut, repeat: true },
+        { ...shortcut, isComposing: true },
+        { ...shortcut, key: "Ń", modifierAltGraph: true },
+      ]) {
+        const event = keyDown(document, binding);
+        expect(event.defaultPrevented).toBe(false);
+      }
+      const handled = new KeyboardEvent("keydown", {
+        ...shortcut,
+        cancelable: true,
+      });
+      handled.preventDefault();
+      fireEvent(document, handled);
+      expect(props.onAddTab).not.toHaveBeenCalled();
+    });
+
+    test("uses the current callback and removes its listener on unmount", () => {
+      const props = createDefaultProps();
+      const { rerender, unmount } = render(<StudioTabBar {...props} />);
+      const onAddTab = mock(() => {});
+      rerender(<StudioTabBar {...props} onAddTab={onAddTab} />);
+      keyDown(document, shortcut);
+      expect(onAddTab).toHaveBeenCalledTimes(1);
+      expect(props.onAddTab).not.toHaveBeenCalled();
+      unmount();
+      keyDown(document, shortcut);
+      expect(onAddTab).toHaveBeenCalledTimes(1);
+    });
+
+    test("scopes embedded workspaces to the one receiving the keyboard event", () => {
+      const first = createDefaultProps();
+      const second = createDefaultProps();
+      const { getByLabelText } = render(
+        <>
+          <section data-studio-workspace>
+            <StudioTabBar {...first} />
+            <textarea aria-label="First query" />
+          </section>
+          <section data-studio-workspace>
+            <StudioTabBar {...second} />
+            <textarea aria-label="Second query" />
+          </section>
+        </>,
+      );
+      keyDown(document, shortcut);
+      expect(first.onAddTab).not.toHaveBeenCalled();
+      expect(second.onAddTab).not.toHaveBeenCalled();
+      keyDown(getByLabelText("First query"), shortcut);
+      expect(first.onAddTab).toHaveBeenCalledTimes(1);
+      expect(second.onAddTab).not.toHaveBeenCalled();
+      keyDown(getByLabelText("Second query"), { ...shortcut, ctrlKey: false, metaKey: true });
+      expect(first.onAddTab).toHaveBeenCalledTimes(1);
+      expect(second.onAddTab).toHaveBeenCalledTimes(1);
+    });
+
+    test("does not create a tab behind a dialog", () => {
+      const props = createDefaultProps();
+      const { getByLabelText } = render(
+        <>
+          <StudioTabBar {...props} />
+          <dialog open>
+            <input aria-label="Connection name" />
+          </dialog>
+          <div role="alertdialog">
+            <button type="button">Confirm</button>
+          </div>
+        </>,
+      );
+      keyDown(getByLabelText("Connection name"), shortcut);
+      keyDown(document.querySelector('[role="alertdialog"] button')!, shortcut);
+      expect(props.onAddTab).not.toHaveBeenCalled();
+    });
+  });
+
   // ── Close button ──────────────────────────────────────────────────────
 
   test("close button fires onCloseTab when multiple tabs", () => {

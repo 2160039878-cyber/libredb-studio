@@ -282,7 +282,7 @@ mock.module("@/components/ui/resizable", () => {
 // that no real heavy child module evaluates in this process.
 
 import { describe, test, expect, afterEach, beforeEach } from "bun:test";
-import { render, cleanup, act } from "@testing-library/react";
+import { render, cleanup, act, fireEvent } from "@testing-library/react";
 import React from "react";
 import type { SavedQueryInput, StudioWorkspaceProps } from "@/workspace/types";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
@@ -437,6 +437,12 @@ describe("StudioWorkspace", () => {
     const root = container.querySelector("[data-studio-workspace]");
     expect(root).not.toBeNull();
     expect(root?.className).toContain("my-custom-class");
+  });
+
+  test("opens keyboard shortcuts in the embedded workspace", () => {
+    const { getByRole } = renderWorkspace();
+    fireEvent.keyDown(document, { key: "?", shiftKey: true });
+    expect(getByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeNull();
   });
 
   test("multiple rerenders do not crash", () => {

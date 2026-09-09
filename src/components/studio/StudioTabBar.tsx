@@ -1,6 +1,6 @@
 "use client";
 
-import React, { type Dispatch, type SetStateAction } from "react";
+import React, { useEffect, useRef, type Dispatch, type SetStateAction } from "react";
 import type { QueryTab } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { FileBraces, Hash, Plus, X } from "lucide-react";
@@ -30,6 +30,37 @@ export function StudioTabBar({
   onCloseTab,
   onAddTab,
 }: StudioTabBarProps) {
+  const tabBarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleNewTab = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.repeat ||
+        event.isComposing ||
+        !(event.ctrlKey || event.metaKey) ||
+        !event.altKey ||
+        !event.shiftKey ||
+        event.code !== "KeyN"
+      )
+        return;
+
+      // Ctrl+Alt can also produce AltGr characters; keep those available for typing.
+      // Command+Option may report a dead key on macOS, so use the physical key there.
+      if (!event.metaKey && event.key.toLowerCase() !== "n") return;
+
+      const workspace = tabBarRef.current?.closest("[data-studio-workspace]");
+      if (workspace && !(event.target instanceof Node && workspace.contains(event.target))) return;
+      if (event.target instanceof Element && event.target.closest('dialog, [role="dialog"], [role="alertdialog"]'))
+        return;
+
+      event.preventDefault();
+      onAddTab();
+    };
+    document.addEventListener("keydown", handleNewTab);
+    return () => document.removeEventListener("keydown", handleNewTab);
+  }, [onAddTab]);
+
   // Roving tabindex (WAI-ARIA tabs pattern): arrows/Home/End move activation,
   // and focus follows the newly activated tab.
   const activateTabAt = (index: number, e: React.KeyboardEvent) => {
@@ -52,6 +83,7 @@ export function StudioTabBar({
 
   return (
     <div
+      ref={tabBarRef}
       role="tablist"
       aria-label="Editor tabs"
       className="hidden md:flex h-10 bg-raised border-b border-hairline items-center px-2 gap-1 overflow-x-auto no-scrollbar"
@@ -151,6 +183,8 @@ export function StudioTabBar({
       <button
         type="button"
         aria-label="New tab"
+        title="New tab (Ctrl+Alt+Shift+N / ⌘+Option+Shift+N)"
+        aria-keyshortcuts="Control+Alt+Shift+N Meta+Alt+Shift+N"
         className="text-fg-muted cursor-pointer hover:text-fg-bright mx-2"
         onClick={onAddTab}
       >
