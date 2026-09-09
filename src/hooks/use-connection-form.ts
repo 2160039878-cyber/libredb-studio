@@ -303,6 +303,9 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
             ...(caCert ? { caCert } : {}),
             ...(clientCert ? { clientCert } : {}),
             ...(clientKey ? { clientKey } : {}),
+            ...(editConnection?.ssl?.mode === sslMode && editConnection.ssl.rejectUnauthorized !== undefined
+              ? { rejectUnauthorized: editConnection.ssl.rejectUnauthorized }
+              : {}),
           }
         : undefined;
 
@@ -316,6 +319,12 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
           ...(sshAuthMethod === "password" ? { password: sshPassword } : {}),
           ...(sshAuthMethod === "privateKey" ? { privateKey: sshPrivateKey } : {}),
           ...(sshPassphrase ? { passphrase: sshPassphrase } : {}),
+          // A pinned host key belongs to this SSH endpoint, not to a replacement bastion.
+          ...(editConnection?.sshTunnel?.host === sshHost &&
+          editConnection.sshTunnel.port === (parseInt(sshPort) || 22) &&
+          editConnection.sshTunnel.hostKeyFingerprint
+            ? { hostKeyFingerprint: editConnection.sshTunnel.hostKeyFingerprint }
+            : {}),
         }
       : undefined;
 
@@ -349,7 +358,10 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       ...(addressedFields.has("schema") && schema ? { schema } : {}),
       createdAt: editConnection?.createdAt || new Date(),
       environment,
-      color: ENVIRONMENT_COLORS[environment],
+      color:
+        editConnection?.color && (editConnection.environment ?? "local") === environment
+          ? editConnection.color
+          : ENVIRONMENT_COLORS[environment],
       ...(sslConfig ? { ssl: sslConfig } : {}),
       ...(sshConfig ? { sshTunnel: sshConfig } : {}),
       ...(getDBConfig(type).showConnectionStringToggle && mongoConnectionMode === "connectionString"

@@ -535,6 +535,71 @@ describe("useConnectionForm", () => {
 
   // ── handleConnect calls onConnect on successful test ───────────────────────
 
+  test.each(["unchanged", "tls", "host", "port", "environment"])(
+    "saving a copy preserves applicable connection settings: %s",
+    async (changed) => {
+      const source: DatabaseConnection = {
+        id: "independent-copy",
+        name: "Team (copy)",
+        type: "postgres",
+        host: "db.example.test",
+        port: 5432,
+        user: "fixture_user",
+        password: "fixture_password",
+        database: "app",
+        createdAt: new Date(0),
+        color: "#123456",
+        environment: "development",
+        group: "team",
+        agentUser: "agent_ro",
+        agentPassword: "fixture_agent",
+        ssl: {
+          mode: "require",
+          rejectUnauthorized: true,
+          caCert: "fixture-ca",
+          clientCert: "fixture-cert",
+          clientKey: "fixture-key",
+        },
+        sshTunnel: {
+          enabled: true,
+          host: "bastion.example.test",
+          port: 22,
+          username: "ops",
+          authMethod: "password",
+          password: "fixture_ssh",
+          hostKeyFingerprint: "SHA256:fixture-host-fingerprint",
+        },
+      };
+      const original = structuredClone(source);
+      const onConnect = mock((_connection: DatabaseConnection) => {});
+      const { result } = renderHook(() =>
+        useConnectionForm({
+          ...defaultProps,
+          editConnection: source,
+          onConnect,
+          onTestConnection: async () => ({ success: true }),
+        }),
+      );
+      act(() => {
+        if (changed === "tls") result.current.setSSLMode("verify-full");
+        if (changed === "host") result.current.setSSHHost("new-bastion.example.test");
+        if (changed === "port") result.current.setSSHPort("2222");
+        if (changed === "environment") result.current.setEnvironment("production");
+      });
+      await act(async () => {
+        await result.current.handleConnect();
+      });
+      const saved = onConnect.mock.calls[0][0];
+      expect(saved.ssl?.rejectUnauthorized).toBe(changed === "tls" ? undefined : true);
+      expect(saved.sshTunnel?.hostKeyFingerprint).toBe(
+        changed === "host" || changed === "port" ? undefined : source.sshTunnel?.hostKeyFingerprint,
+      );
+      if (changed === "unchanged") expect(saved).toEqual(source);
+      if (changed === "environment") expect(saved.color).not.toBe(source.color);
+      expect(source).toEqual(original);
+    },
+  );
+
   test("handleConnect calls onConnect on successful test", async () => {
     mockGlobalFetch({
       "/api/db/test-connection": { ok: true, json: { success: true, latency: 10 } },

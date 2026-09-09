@@ -762,6 +762,7 @@ Pre-configure database connections via a YAML config file so users see them imme
 **Features:**
 - Role-based access control (`admin`, `user`, `*` wildcard)
 - Hybrid model: `managed: true` (read-only, admin-controlled) or `managed: false` (editable copy for user)
+- Editable connections offer **Duplicate**: open an independent `(copy)` in the connection editor, adjust its settings and save. Cancelling leaves the saved connections unchanged; administrator-managed connections cannot be duplicated.
 - Credentials injected via `${ENV_VAR}` syntax — never stored in config file
 - Hot-reload: config changes apply within 60s without restart
 - Works with Docker, docker-compose, and Kubernetes (Helm)

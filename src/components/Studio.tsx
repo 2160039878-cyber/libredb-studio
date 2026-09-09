@@ -195,6 +195,18 @@ export default function Studio() {
   // === Modal state ===
   const [isConnectionModalOpen, setIsConnectionModalOpen] = useState(false);
   const [editingConnection, setEditingConnection] = useState<DatabaseConnection | null>(null);
+  const handleDuplicateConnection = (source: DatabaseConnection) => {
+    setEditingConnection({
+      ...structuredClone(source),
+      id: newLocalId(),
+      name: `${source.name} (copy)`,
+      createdAt: new Date(),
+      // A new local connection must not be merged back into its source seed on reload.
+      seedId: undefined,
+      managed: false,
+    });
+    setIsConnectionModalOpen(true);
+  };
   const [pendingDeleteConnectionId, setPendingDeleteConnectionId] = useState<string | null>(null);
   const [isCreateTableModalOpen, setIsCreateTableModalOpen] = useState(false);
   const [showDiagram, setShowDiagram] = useState(false);
@@ -492,6 +504,7 @@ export default function Studio() {
                   setEditingConnection(c);
                   setIsConnectionModalOpen(true);
                 }}
+                onDuplicateConnection={handleDuplicateConnection}
                 onAddConnection={() => setIsConnectionModalOpen(true)}
                 onTableClick={onTableClick}
                 onGenerateSelect={tabMgr.handleGenerateSelect}
@@ -606,6 +619,7 @@ export default function Studio() {
                       setActiveMobileTab("editor");
                     }}
                     onDeleteConnection={requestDeleteConnection}
+                    onDuplicateConnection={handleDuplicateConnection}
                     onAddConnection={() => setIsConnectionModalOpen(true)}
                   />
                 </div>
