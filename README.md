@@ -128,6 +128,7 @@ And nothing is held back. Single sign-on, ER diagrams, the AI features and the N
 ### Professional SQL IDE
 - **Monaco Engine**: Powered by the same core as VS Code.
 - **Smart Autocomplete**: Schema-aware suggestions for tables, columns, and SQL keywords.
+- **Command Palette**: Quick access to tables, connections, saved queries, and actions with `Cmd/Ctrl+K`.
 - **Multi-Tab Workspace**: Handle parallel tasks with independent execution states.
 - **Visual EXPLAIN**: Graphical execution plans to identify performance bottlenecks.
 - **Interactive ER Diagrams**: Visual schema graph with real foreign key edges, cardinality labels, MiniMap navigation, table search/filter, compact mode, and PNG/SVG export. Automatic hierarchical layout powered by ELK.js.
