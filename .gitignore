@@ -192,3 +192,4 @@ deploy/digitalocean/droplet/scripts/99-img-check.sh
 
 # Isolated data for the production subpath regression suite.
 data-e2e-base-path/
+.reviews/
