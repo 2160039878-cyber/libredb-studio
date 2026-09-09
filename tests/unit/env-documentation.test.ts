@@ -30,11 +30,10 @@
  *
  * What stays out of scope: a name that reaches `process.env[...]` as a function
  * argument or parameter, because resolving it needs a call graph and a regex
- * that faked one would report a name that is not a name. Two reads are in that
- * position today -- `getEnvVar("LLM_PROVIDER")` in `src/lib/llm/utils/config.ts`
- * and `process.env[envVar]` in `src/lib/seed/credential-resolver.ts` -- leaving
- * `HOSTNAME`, `MY_DB_PASSWORD` and the four `LLM_*` names undiscovered. That is
- * the whole remaining gap, not an aside.
+ * that faked one would report a name that is not a name. The only remaining
+ * read in that position is `process.env[envVar]` in
+ * `src/lib/seed/credential-resolver.ts`, leaving `HOSTNAME` and `MY_DB_PASSWORD`
+ * undiscovered. The four direct `LLM_*` reads are covered.
  */
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -175,16 +174,20 @@ describe("environment variable documentation", () => {
   });
 
   test("#609 boundary: a name reached through a function argument stays undiscovered", () => {
-    // getEnvVar("LLM_PROVIDER") in src/lib/llm/utils/config.ts and
-    // process.env[envVar] in src/lib/seed/credential-resolver.ts need a call
+    // process.env[envVar] in src/lib/seed/credential-resolver.ts needs a call
     // graph. When that stops being true, this test is the reminder to widen the
     // extractor rather than a silent gain.
     const names = new Set(readNames());
     // Control: a negative-only test passes on an empty set, so anchor it to a
     // name the extractor must always find before trusting the absences below.
     expect(names.has("JWT_SECRET")).toBe(true);
-    for (const name of ["LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL", "LLM_API_URL", "MY_DB_PASSWORD"]) {
-      expect(names.has(name)).toBe(false);
+    expect(names.has("MY_DB_PASSWORD")).toBe(false);
+  });
+
+  test("LLM configuration reads are visible to the documentation guard", () => {
+    const names = new Set(readNames());
+    for (const name of ["LLM_PROVIDER", "LLM_API_KEY", "LLM_MODEL", "LLM_API_URL"]) {
+      expect(names.has(name), name).toBe(true);
     }
   });
 
