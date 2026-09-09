@@ -79,6 +79,22 @@ describe("OverviewTab", () => {
     expect(cacheCard().className).toContain("border-hue-green");
   });
 
+  test("does not grade missing readings at saved boundaries", () => {
+    storage.saveThresholdConfig([
+      { metric: "connectionPercent", warning: 0, critical: 0, direction: "above", label: "Connections" },
+      { metric: "cacheHitRatio", warning: 100, critical: 100, direction: "below", label: "Cache" },
+    ]);
+    const base = makeData();
+    const data = {
+      ...base,
+      overview: { ...base.overview, maxConnections: 0 },
+      performance: { ...base.performance, cacheHitRatio: undefined },
+    } as MonitoringData;
+    const { getByText } = render(<OverviewTab data={data} loading={false} />);
+    expect(getByText("Connections").closest('[data-slot="card"]')!.className).toContain("border-hue-green");
+    expect(getByText("Cache Hit").closest('[data-slot="card"]')!.className).toContain("border-hue-green");
+  });
+
   test("renders skeleton while loading without data", () => {
     const { queryByText } = render(<OverviewTab data={null} loading />);
     expect(queryByText("Connections")).toBeNull();

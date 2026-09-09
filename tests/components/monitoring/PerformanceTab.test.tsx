@@ -80,6 +80,14 @@ describe("PerformanceTab", () => {
     expect(card("Deadlocks").className).toContain("border-hue-red");
   });
 
+  test("does not grade missing readings at saved boundaries", () => {
+    storage.saveThresholdConfig([
+      { metric: "cacheHitRatio", warning: 100, critical: 100, direction: "below", label: "Cache" },
+    ]);
+    const { getByText } = render(<PerformanceTab data={makeData({ cacheHitRatio: undefined })} loading={false} />);
+    expect(getByText("Cache Hit").closest('[data-slot="card"]')!.className).toContain("border-hue-green");
+  });
+
   test("renders skeleton while loading without data", () => {
     const { queryByText } = render(<PerformanceTab data={null} loading />);
     expect(queryByText("Cache Hit")).toBeNull();
