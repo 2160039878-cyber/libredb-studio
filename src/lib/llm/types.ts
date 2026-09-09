@@ -90,7 +90,11 @@ export class LLMError extends Error {
  * Configuration error - missing or invalid config
  */
 export class LLMConfigError extends LLMError {
-  constructor(message: string, provider?: LLMProviderType) {
+  constructor(
+    message: string,
+    provider?: LLMProviderType,
+    public readonly reason?: "missing_credentials",
+  ) {
     super(message, provider);
     this.name = "LLMConfigError";
     Object.setPrototypeOf(this, LLMConfigError.prototype);

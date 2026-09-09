@@ -281,6 +281,11 @@ describe("BaseLLMProvider", () => {
     test("throws LLMConfigError when missing", () => {
       const provider = new ExposedProvider(makeConfig({ apiKey: undefined }));
       expect(() => provider.exposedEnsureApiKey()).toThrow(LLMConfigError);
+      try {
+        provider.exposedEnsureApiKey();
+      } catch (error) {
+        expect((error as LLMConfigError).reason).toBe("missing_credentials");
+      }
     });
   });
 

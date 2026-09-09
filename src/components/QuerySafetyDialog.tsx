@@ -168,7 +168,7 @@ export function QuerySafetyDialog({
         if (!response.ok) {
           const errData = await response.json();
           // AI is optional; an unconfigured provider still leaves the local confirmation in place.
-          if (errData.code === ApiErrorCode.LLM_CONFIG) return;
+          if (errData.code === ApiErrorCode.LLM_UNCONFIGURED) return;
           throw new Error(errData.error || "Analysis failed");
         }
 

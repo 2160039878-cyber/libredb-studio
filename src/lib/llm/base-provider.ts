@@ -88,7 +88,7 @@ export abstract class BaseLLMProvider implements LLMProvider {
    */
   protected ensureApiKey(): string {
     if (!this.config.apiKey) {
-      throw new LLMConfigError(`API key is required for ${this.name} provider`, this.name);
+      throw new LLMConfigError(`API key is required for ${this.name} provider`, this.name, "missing_credentials");
     }
     return this.config.apiKey;
   }

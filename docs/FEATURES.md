@@ -88,7 +88,7 @@
 
 ### 10. AI Reliability & Error Management
 *   **Intelligent Error Handling:** Comprehensive English error messages for API quotas, rate limits, and service availability issues.
-*   **In-Place Error Alerts:** An AI feature that fails says so where it was invoked — the Query Safety dialog and the schema-documentation panel each render the failure inline instead of leaving a spinner or an empty result. (The in-editor AI panel that used to hold these alerts was removed; the alerts were not.)
+*   **In-Place Error Alerts:** The Query Safety dialog and schema-documentation panel render AI failures inline. Query Safety omits only the missing-credentials setup error when AI is unconfigured, retaining the plain warning and explicit Cancel/Execute controls. Invalid provider settings, missing models or service URLs, authentication errors and service failures remain visible.
 *   **Graceful Degradation:** Robust backend logic to handle API timeouts and authentication failures without crashing the UI.
 
 ### 11. DevOps & Enterprise Deployment

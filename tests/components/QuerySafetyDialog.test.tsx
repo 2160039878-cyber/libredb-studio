@@ -143,7 +143,7 @@ describe("QuerySafetyDialog", () => {
         chunks: [],
         ok: false,
         status: 503,
-        jsonBody: { error: configError, code: "LLM_CONFIG", statusCode: 503 },
+        jsonBody: { error: configError, code: "LLM_UNCONFIGURED", statusCode: 503 },
       }),
     ) as unknown as typeof fetch;
     const view = render(
@@ -169,6 +169,23 @@ describe("QuerySafetyDialog", () => {
     fireEvent.click(view.getByRole("button", { name: action }));
     expect(onProceed).toHaveBeenCalledTimes(action === "Execute Query" ? 1 : 0);
     expect(onClose).toHaveBeenCalledTimes(action === "Cancel" ? 1 : 0);
+  });
+
+  test.each([
+    "Invalid provider: gemni. Valid options: gemini, openai, ollama, custom",
+    "Model name is required for ollama provider.",
+    "Custom provider requires LLM_API_URL environment variable.",
+    'Model not found. Make sure "llama3" is pulled in Ollama.',
+  ])("a configured AI failure remains visible: %s", async (message) => {
+    globalThis.fetch = mock(async () =>
+      createStreamResponse({ chunks: [], ok: false, status: 503, jsonBody: { error: message, code: "LLM_CONFIG" } }),
+    ) as unknown as typeof fetch;
+    const view = render(
+      <QuerySafetyDialog isOpen query="DROP TABLE users" schemaContext="" onClose={onClose} onProceed={onProceed} />,
+    );
+    await waitFor(() => expect(view.queryByText("Analyzing query safety...") === null).toBe(true));
+    expect(view.queryByText(message) !== null).toBe(true);
+    expect(onProceed).not.toHaveBeenCalled();
   });
 
   test("an invalid configured AI key still reports its authentication error", async () => {

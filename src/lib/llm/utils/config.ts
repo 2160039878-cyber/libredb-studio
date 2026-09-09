@@ -121,11 +121,19 @@ export function validateConfig(config: LLMConfig): void {
 
   // Validate API key requirements
   if (config.provider === "gemini" && !config.apiKey) {
-    throw new LLMConfigError("Gemini API key is required. Set LLM_API_KEY environment variable.", "gemini");
+    throw new LLMConfigError(
+      "Gemini API key is required. Set LLM_API_KEY environment variable.",
+      "gemini",
+      "missing_credentials",
+    );
   }
 
   if (config.provider === "openai" && !config.apiKey) {
-    throw new LLMConfigError("OpenAI API key is required. Set LLM_API_KEY environment variable.", "openai");
+    throw new LLMConfigError(
+      "OpenAI API key is required. Set LLM_API_KEY environment variable.",
+      "openai",
+      "missing_credentials",
+    );
   }
 
   // Validate API URL for custom provider
