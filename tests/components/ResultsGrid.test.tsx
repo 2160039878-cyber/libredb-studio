@@ -1,5 +1,5 @@
 import "../setup-dom";
-import "../helpers/mock-sonner";
+import { mockToastError, mockToastSuccess } from "../helpers/mock-sonner";
 import "../helpers/mock-navigation";
 
 import { mock } from "bun:test";
@@ -60,6 +60,15 @@ mock.module("@/components/results-grid/StatsBar", () => ({
     React.createElement(
       "div",
       { "data-testid": "stats-bar" },
+      ...["json", "yaml", "csv"].map((format) =>
+        props.onCopyRows
+          ? React.createElement(
+              "button",
+              { key: format, onClick: () => (props.onCopyRows as (format: string) => void)(format) },
+              `Copy rows as ${format.toUpperCase()}`,
+            )
+          : null,
+      ),
       React.createElement(
         "span",
         { "data-testid": "row-count" },
@@ -140,6 +149,7 @@ import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { render, fireEvent, cleanup, act } from "@testing-library/react";
 import { ResultsGrid, type CellChange } from "@/components/ResultsGrid";
 import type { QueryResult } from "@/lib/types";
+import { parse as parseYaml } from "yaml";
 
 // ── Test data ───────────────────────────────────────────────────────────────
 
@@ -195,6 +205,144 @@ describe("ResultsGrid", () => {
     mockDetectSensitiveColumnsFromConfig.mockClear();
     mockDetectSensitiveColumnsFromConfig.mockReturnValue(new Map());
     mockShouldMask.mockReturnValue(false);
+  });
+
+  describe("clipboard actions", () => {
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    const originalExecCommand = Object.getOwnPropertyDescriptor(document, "execCommand");
+    const writeText = mock(async (_text: string) => {});
+
+    beforeEach(() => {
+      writeText.mockReset();
+      writeText.mockImplementation(async () => {});
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      mockToastError.mockClear();
+      mockToastSuccess.mockClear();
+    });
+
+    afterEach(() => {
+      Object.defineProperty(navigator, "clipboard", originalClipboard ?? { value: undefined, configurable: true });
+      Object.defineProperty(document, "execCommand", originalExecCommand ?? { value: undefined, configurable: true });
+    });
+
+    test("right-click copies the complete cell text without opening the row", async () => {
+      const value = '  雪,"hello"\n' + "long value ".repeat(60);
+      const result = { ...mockResult, rows: [{ id: 1, name: value }], fields: ["id", "name"] };
+      const { container, getByRole, queryByTestId } = render(<ResultsGrid result={result} />);
+      const cell = container.querySelector('[data-index="0"]:not([data-testid])')!.children[1];
+      fireEvent.contextMenu(cell);
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Cell" })));
+      expect(writeText.mock.calls[0][0]).toBe(value);
+      expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+      expect(queryByTestId("row-detail-sheet") === null).toBe(true);
+    });
+
+    test("mobile table context copy does not open the row detail sheet", async () => {
+      const { container, getByRole, queryByTestId } = render(<ResultsGrid result={mockResult} />);
+      const cell = container.querySelector("button.text-left")!.children[1];
+      fireEvent.contextMenu(cell);
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Cell" })));
+      expect(writeText.mock.calls[0][0]).toBe("Alice");
+      expect(queryByTestId("row-detail-sheet") === null).toBe(true);
+    });
+
+    test("mobile card context copies the complete row", async () => {
+      const { getAllByTestId, getByRole, queryByRole } = render(<ResultsGrid result={mockResult} />);
+      fireEvent.contextMenu(getAllByTestId("result-card")[0]);
+      expect(queryByRole("menuitem", { name: "Copy Cell" }) === null).toBe(true);
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Row as JSON" })));
+      expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(mockResult.rows[0]);
+    });
+
+    test("bulk copy includes only the rows matching the active filter", async () => {
+      const { getAllByTitle, getByPlaceholderText, getByRole } = render(<ResultsGrid result={mockResult} />);
+      fireEvent.click(getAllByTitle("Filter column")[1]);
+      fireEvent.change(getByPlaceholderText("Filter name..."), { target: { value: "bob" } });
+      await act(async () => fireEvent.click(getByRole("button", { name: "Copy rows as JSON" })));
+      expect(JSON.parse(writeText.mock.calls[0][0])).toEqual([mockResult.rows[1]]);
+    });
+
+    test("cell and row copy retain masking even after a temporary reveal", async () => {
+      mockShouldMask.mockReturnValue(true);
+      mockDetectSensitiveColumnsFromConfig.mockReturnValue(new Map([["email", { id: "email" }]]));
+      const result = {
+        ...mockResult,
+        rows: [{ id: 1, email: "secret@example.com", hidden: "not a result field" }],
+        fields: ["id", "email"],
+      };
+      const { container, getByRole, getByTitle } = render(<ResultsGrid result={result} maskingEnabled />);
+      fireEvent.click(getByTitle("Reveal value (10s)"));
+      const cell = () => container.querySelector('[data-index="0"]:not([data-testid])')!.children[1];
+      fireEvent.contextMenu(cell());
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Cell" })));
+      expect(writeText.mock.calls[0][0]).toBe("***");
+      fireEvent.contextMenu(cell());
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Row as JSON" })));
+      expect(JSON.parse(writeText.mock.calls[1][0])).toEqual({ id: 1, email: "***" });
+      expect(result.rows[0].email).toBe("secret@example.com");
+    });
+
+    test("row copy follows sorted rows and includes visible pending edits", async () => {
+      const { container, getAllByRole, getByRole } = render(
+        <ResultsGrid
+          result={mockResult}
+          pendingChanges={[{ rowIndex: 2, columnId: "name", originalValue: "Charlie", newValue: "Charlie edited" }]}
+        />,
+      );
+      fireEvent.click(getAllByRole("button", { name: "name" })[0]);
+      fireEvent.click(getAllByRole("button", { name: "name, sorted ascending" })[0]);
+      fireEvent.contextMenu(container.querySelector('[data-index="0"]:not([data-testid])')!.children[1]);
+      await act(async () => fireEvent.click(getByRole("menuitem", { name: "Copy Row as JSON" })));
+      expect(JSON.parse(writeText.mock.calls[0][0])).toEqual({
+        id: 3,
+        name: "Charlie edited",
+        email: "charlie@example.com",
+      });
+    });
+
+    test.each(["JSON", "YAML", "CSV"])("copies loaded rows as %s without fetching additional pages", async (format) => {
+      const onLoadMore = mock(() => {});
+      const result = {
+        ...mockPaginatedResult,
+        fields: ["id", "name"],
+        rows: [
+          { id: 1, name: '雪,"hi"\nnext' },
+          { id: 2, name: null },
+        ],
+      };
+      const { getByRole } = render(<ResultsGrid result={result} onLoadMore={onLoadMore} />);
+      await act(async () => fireEvent.click(getByRole("button", { name: `Copy rows as ${format}` })));
+      const text = writeText.mock.calls[0][0];
+      if (format === "JSON") expect(JSON.parse(text)).toEqual(result.rows);
+      if (format === "YAML") expect(parseYaml(text)).toEqual(result.rows);
+      if (format === "CSV") expect(text).toBe('id,name\n1,"雪,""hi""\nnext"\n2,');
+      expect(onLoadMore).not.toHaveBeenCalled();
+    });
+
+    test("bulk copy applies masking and preserves sort order", async () => {
+      mockShouldMask.mockReturnValue(true);
+      mockDetectSensitiveColumnsFromConfig.mockReturnValue(new Map([["email", { id: "email" }]]));
+      const { getByRole, getAllByRole } = render(<ResultsGrid result={mockResult} maskingEnabled />);
+      fireEvent.click(getAllByRole("button", { name: "name" })[0]);
+      fireEvent.click(getAllByRole("button", { name: "name, sorted ascending" })[0]);
+      await act(async () => fireEvent.click(getByRole("button", { name: "Copy rows as JSON" })));
+      expect(JSON.parse(writeText.mock.calls[0][0])).toEqual([
+        { id: 3, name: "Charlie", email: "***" },
+        { id: 2, name: "Bob", email: "***" },
+        { id: 1, name: "Alice", email: "***" },
+      ]);
+    });
+
+    test("a refused clipboard reports failure instead of success", async () => {
+      writeText.mockImplementation(async () => {
+        throw new Error("denied");
+      });
+      Object.defineProperty(document, "execCommand", { value: () => false, configurable: true });
+      const { getByRole } = render(<ResultsGrid result={mockResult} />);
+      await act(async () => fireEvent.click(getByRole("button", { name: "Copy rows as JSON" })));
+      expect(mockToastError).toHaveBeenCalledTimes(1);
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
   });
 
   // ── 1. Renders "No results" when result has empty rows ────────────────────

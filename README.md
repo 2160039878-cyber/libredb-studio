@@ -204,6 +204,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 - **Column Filtering**: Per-column text filters on query results for instant data exploration.
 - **Interactive Pivot Table**: Client-side pivoting with 5 aggregation functions (COUNT, SUM, AVG, MIN, MAX) and SQL generation.
 - **Expert Exporter**: Instant CSV and JSON exports for reporting.
+- **Result Clipboard**: Right-click a cell to copy its full value or its row as JSON. **Copy rows** copies loaded, filtered and sorted results as JSON, YAML or CSV, respecting the active display mask.
 
 ### Advanced Data Visualization
 - **8 Chart Types**: Bar, Line, Pie, Area, Scatter, Histogram, Stacked Bar, and Stacked Area charts powered by Recharts.

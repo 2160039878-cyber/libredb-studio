@@ -40,6 +40,7 @@ if (typeof globalThis.document === "undefined") {
     "setInterval",
     "clearInterval",
     "DOMParser",
+    "DOMRect",
     "XMLSerializer",
     "URL",
     "URLSearchParams",

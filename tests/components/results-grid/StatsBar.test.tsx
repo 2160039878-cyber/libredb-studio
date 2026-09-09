@@ -8,6 +8,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { LoadMoreFooter, StatsBar } from "@/components/results-grid/StatsBar";
 import type { QueryResult } from "@/lib/types";
 import type { CellChange } from "@/components/ResultsGrid";
+import userEvent from "@testing-library/user-event";
 
 function makeResult(): QueryResult {
   return {
@@ -31,6 +32,46 @@ function makeResult(): QueryResult {
 describe("results-grid/StatsBar", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  test.each(["json", "yaml", "csv"] as const)("copies rows as %s through the real menu", async (format) => {
+    const onCopyRows = mock(() => {});
+    const { getByRole } = render(
+      <StatsBar
+        result={makeResult()}
+        filteredRowCount={2}
+        activeFilterCount={0}
+        onClearFilters={mock(() => {})}
+        viewMode="card"
+        onSetViewMode={mock(() => {})}
+        hasSensitive={false}
+        effectiveMaskingEnabled={false}
+        userCanToggle={false}
+        onCopyRows={onCopyRows}
+      />,
+    );
+    const user = userEvent.setup();
+    await user.click(getByRole("button", { name: "Copy rows" }));
+    await user.click(getByRole("menuitem", { name: `Copy as ${format.toUpperCase()}` }));
+    expect(onCopyRows).toHaveBeenCalledWith(format);
+  });
+
+  test("disables copying when filters leave no rows", () => {
+    const { getByRole } = render(
+      <StatsBar
+        result={makeResult()}
+        filteredRowCount={0}
+        activeFilterCount={1}
+        onClearFilters={mock(() => {})}
+        viewMode="card"
+        onSetViewMode={mock(() => {})}
+        hasSensitive={false}
+        effectiveMaskingEnabled={false}
+        userCanToggle={false}
+        onCopyRows={mock(() => {})}
+      />,
+    );
+    expect((getByRole("button", { name: "Copy rows" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   test("renders stats and filter summary, clears filters", () => {

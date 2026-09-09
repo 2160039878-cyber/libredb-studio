@@ -30,6 +30,11 @@ import { ResultCard } from "@/components/results-grid/ResultCard";
 import { RowDetailSheet } from "@/components/results-grid/RowDetailSheet";
 import { StatsBar, LoadMoreFooter } from "@/components/results-grid/StatsBar";
 import { describeWarning, formatCellValue } from "@/components/results-grid/utils";
+import { ResultContextMenu } from "@/components/results-grid/ResultContextMenu";
+import { writeToClipboard } from "@/components/copy-button";
+import { resultClipboardText } from "@/lib/export/clipboard";
+import { cellOf } from "@/lib/export/csv";
+import { toast } from "sonner";
 
 export interface CellChange {
   rowIndex: number;
@@ -216,6 +221,25 @@ export function ResultsGrid({
     setColumnFilters(new Map());
     setActiveFilterCol(null);
   }, []);
+
+  const copyRow = (row: Record<string, unknown>, rowIndex?: number): Record<string, unknown> =>
+    Object.fromEntries(
+      result.fields.map((field) => {
+        const change = rowIndex === undefined ? undefined : getCellChange(rowIndex, field);
+        const value = change === undefined ? cellOf(row, field) : change.newValue;
+        const pattern = sensitiveColumns.get(field);
+        // A temporary on-screen reveal must not bypass the export mask.
+        return [
+          field,
+          effectiveMaskingEnabled && pattern && value != null ? maskValueByPattern(value, pattern) : value,
+        ];
+      }),
+    );
+
+  const copyText = async (text: string) => {
+    if (await writeToClipboard(text)) toast.success("Copied to clipboard");
+    else toast.error("Could not copy to clipboard");
+  };
 
   const columns = useMemo<ColumnDef<typeof tableFeatureSet, Record<string, unknown>>[]>(() => {
     return result.fields.map((field) => ({
@@ -536,34 +560,48 @@ export function ResultsGrid({
         pendingChanges={pendingChanges}
         onApplyChanges={onApplyChanges}
         onDiscardChanges={onDiscardChanges}
+        onCopyRows={(format) =>
+          copyText(
+            resultClipboardText(
+              format,
+              rows.map((row) => copyRow(row.original, row.index)),
+              result.fields,
+            ),
+          )
+        }
       />
 
       <div ref={cardContainerRef} className={cn("flex-1 overflow-auto p-4 md:hidden", viewMode !== "card" && "hidden")}>
         <div style={{ height: `${cardVirtualizer.getTotalSize()}px`, position: "relative" }}>
           {cardVirtualizer.getVirtualItems().map((virtualRow) => (
-            <div
+            <ResultContextMenu
               key={virtualRow.index}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                height: `${virtualRow.size}px`,
-                transform: `translateY(${virtualRow.start}px)`,
-                padding: "4px 0",
-              }}
+              getRow={() => copyRow(result.rows[virtualRow.index])}
+              onCopy={copyText}
             >
-              <ResultCard
-                row={result.rows[virtualRow.index]}
-                fields={result.fields}
-                primaryColumn={primaryColumn}
-                idColumn={idColumn}
-                index={virtualRow.index}
-                onSelect={() => setSelectedRow({ row: result.rows[virtualRow.index], index: virtualRow.index })}
-                maskingActive={effectiveMaskingEnabled}
-                sensitiveColumns={sensitiveColumns}
-              />
-            </div>
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: `${virtualRow.size}px`,
+                  transform: `translateY(${virtualRow.start}px)`,
+                  padding: "4px 0",
+                }}
+              >
+                <ResultCard
+                  row={result.rows[virtualRow.index]}
+                  fields={result.fields}
+                  primaryColumn={primaryColumn}
+                  idColumn={idColumn}
+                  index={virtualRow.index}
+                  onSelect={() => setSelectedRow({ row: result.rows[virtualRow.index], index: virtualRow.index })}
+                  maskingActive={effectiveMaskingEnabled}
+                  sensitiveColumns={sensitiveColumns}
+                />
+              </div>
+            </ResultContextMenu>
           ))}
         </div>
       </div>
@@ -635,16 +673,17 @@ export function ResultsGrid({
                     const className = isMasked ? "text-fg-muted italic" : formatCellValue(row[field]).className;
 
                     return (
-                      <div
-                        key={field}
-                        className={cn(
-                          "h-full px-4 py-3 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden flex items-center",
-                          idx === 0 && "sticky left-0 z-10 bg-sunken shadow-[2px_0_8px_rgba(0,0,0,0.3)]",
-                          "min-w-[120px]",
-                        )}
-                      >
-                        <span className={className}>{displayValue}</span>
-                      </div>
+                      <ResultContextMenu key={field} column={field} getRow={() => copyRow(row)} onCopy={copyText}>
+                        <div
+                          className={cn(
+                            "h-full px-4 py-3 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden flex items-center",
+                            idx === 0 && "sticky left-0 z-10 bg-sunken shadow-[2px_0_8px_rgba(0,0,0,0.3)]",
+                            "min-w-[120px]",
+                          )}
+                        >
+                          <span className={className}>{displayValue}</span>
+                        </div>
+                      </ResultContextMenu>
                     );
                   })}
                 </button>
@@ -697,13 +736,19 @@ export function ResultsGrid({
                   className="flex group hover:bg-brand-tint/[0.03] transition-colors border-b border-hairline"
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <div
+                    <ResultContextMenu
                       key={cell.id}
-                      style={{ width: cell.column.getSize(), minWidth: cell.column.getSize() }}
-                      className="h-full px-4 py-2 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden group-hover:border-hairline-strong flex items-center shrink-0"
+                      column={cell.column.id}
+                      getRow={() => copyRow(row.original, row.index)}
+                      onCopy={copyText}
                     >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </div>
+                      <div
+                        style={{ width: cell.column.getSize(), minWidth: cell.column.getSize() }}
+                        className="h-full px-4 py-2 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden group-hover:border-hairline-strong flex items-center shrink-0"
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </div>
+                    </ResultContextMenu>
                   ))}
                 </div>
               );

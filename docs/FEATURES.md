@@ -116,6 +116,7 @@
 
 ### 15. Professional Data Export
 *   **Format Versatility:** Instantly export query result sets to CSV, JSON, SQL `INSERT` statements, or a generated `CREATE TABLE` DDL.
+*   **Clipboard:** Right-click a grid cell for **Copy Cell** or **Copy Row as JSON**; mobile cards also offer row copy. **Copy rows** copies the loaded result rows in the current filter and sort order as JSON, YAML or CSV, without fetching more pages. Active display masking also applies to copied data, including temporarily revealed cells.
 *   **Developer-Ready:** Clean data output optimized for external analysis, reporting, or database migrations.
 *   **Formula-Safe CSV:** A cell whose value starts with `=`, `+`, `-`, `@`, a tab or a carriage return is written with a leading apostrophe, so a spreadsheet shows it as text instead of evaluating it when the file is opened; this is unconditional and has no setting, and a plain number such as `-12.5` is left exactly as it is.
 

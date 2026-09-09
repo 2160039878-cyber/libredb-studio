@@ -7,6 +7,13 @@ import { ChevronDown, LayoutGrid, Table2, LoaderCircle, EyeOff, Eye, Save, X, Fu
 import { Button } from "@/components/ui/button";
 import type { CellChange } from "@/components/ResultsGrid";
 import { describeWarning } from "@/components/results-grid/utils";
+import type { ClipboardFormat } from "@/lib/export/clipboard";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 
 const MASKED_LABEL = "MASKED";
 const LOADING_LABEL = "Loading...";
@@ -19,6 +26,7 @@ export interface StatsBarProps {
   onClearFilters: () => void;
   viewMode: "card" | "table";
   onSetViewMode: (mode: "card" | "table") => void;
+  onCopyRows?: (format: ClipboardFormat) => void;
   // Masking props
   hasSensitive: boolean;
   effectiveMaskingEnabled: boolean;
@@ -41,6 +49,7 @@ export function StatsBar({
   onClearFilters,
   viewMode,
   onSetViewMode,
+  onCopyRows,
   hasSensitive,
   effectiveMaskingEnabled,
   userCanToggle,
@@ -54,7 +63,7 @@ export function StatsBar({
   const warningDetail = warnings.map(describeWarning).join("\n");
 
   return (
-    <div className="flex items-center justify-between px-4 py-2 border-b border-hairline bg-surface text-xs text-fg-muted font-mono">
+    <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-2 border-b border-hairline bg-surface text-xs text-fg-muted font-mono">
       <div className="flex items-center gap-4">
         <span className="flex items-center gap-1.5">
           <span className="w-1.5 h-1.5 rounded-full bg-success-tint/50" />
@@ -85,6 +94,29 @@ export function StatsBar({
       </div>
 
       <div className="flex items-center gap-2">
+        {onCopyRows && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-6 px-2 text-xs gap-1"
+                disabled={filteredRowCount === 0}
+                title="Copy loaded rows in the current filter and sort order"
+              >
+                Copy rows
+                <ChevronDown className="w-3 h-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {(["json", "yaml", "csv"] as const).map((format) => (
+                <DropdownMenuItem key={format} onSelect={() => onCopyRows(format)}>
+                  Copy as {format.toUpperCase()}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {hasSensitive &&
           (userCanToggle && onToggleMasking ? (
             <Button
