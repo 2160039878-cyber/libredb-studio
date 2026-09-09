@@ -1447,6 +1447,7 @@ These are the values of the `code` field emitted by `createErrorResponse` (`src/
 | `LLM_AUTH` | Invalid LLM API key (401) |
 | `LLM_RATE_LIMIT` | LLM usage/rate limit reached (429) |
 | `LLM_CONFIG` | LLM misconfigured (503) |
+| `LLM_UNCONFIGURED` | Required LLM provider credentials are missing (503) |
 | `LLM_STREAM` | LLM streaming failure (502) |
 | `LLM_ERROR` | Generic LLM error |
 | `INTERNAL_ERROR` | Unhandled server error (500) |
