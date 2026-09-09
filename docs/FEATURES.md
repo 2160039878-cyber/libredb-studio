@@ -18,6 +18,7 @@
 *   **Workspace Tabs:** Open multiple queries simultaneously in separate tabs.
 *   **Independent Results:** Each tab maintains its own execution state and results grid.
 *   **Persistent Tabs:** Switch between tasks without losing your work.
+*   **Connection Order:** Drag a sidebar connection by its handle, or focus the handle and use `Alt+↑` / `Alt+↓`. The order is saved in the current browser, including for administrator-managed connections. New connections appear after the saved order; reordering does not change connection settings or switch the active connection.
 
 ### 3. Pro Data Grid (Excel-Style)
 *   **High Performance:** Virtualized rendering using TanStack Virtual for smooth scrolling through millions of rows.

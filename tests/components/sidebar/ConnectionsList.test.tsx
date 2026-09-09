@@ -58,8 +58,8 @@ mock.module("@/lib/db-ui-config", () => ({
   getDBColor: () => "text-hue-blue",
 }));
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
+import { render, fireEvent, cleanup, act } from "@testing-library/react";
 import React from "react";
 
 import { ConnectionsList } from "@/components/sidebar/ConnectionsList";
@@ -80,10 +80,110 @@ describe("ConnectionsList", () => {
   });
 
   beforeEach(() => {
+    localStorage.clear();
     defaultOnSelect.mockClear();
     defaultOnDelete.mockClear();
     defaultOnEdit.mockClear();
     defaultOnAdd.mockClear();
+  });
+
+  const orderedProps = () => ({
+    connections: [mockPostgresConnection, mockMySQLConnection],
+    activeConnection: mockPostgresConnection,
+    onSelectConnection: defaultOnSelect,
+    onDeleteConnection: defaultOnDelete,
+    onEditConnection: defaultOnEdit,
+    onAddConnection: defaultOnAdd,
+  });
+
+  test("dragging connections persists the order without selecting or changing a connection", () => {
+    const props = orderedProps();
+    const { getByRole, getAllByRole, unmount } = render(<ConnectionsList {...props} />);
+    const handle = getByRole("button", { name: "Reorder Test PostgreSQL" });
+    const transfer = { setData: mock(() => {}), effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(handle, { dataTransfer: transfer });
+    fireEvent.dragOver(getAllByRole("listitem")[1], { dataTransfer: transfer });
+    fireEvent.drop(getAllByRole("listitem")[1], { dataTransfer: transfer });
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test MySQL");
+    expect(JSON.parse(localStorage.getItem("libredb_connection_order")!)).toEqual([
+      mockMySQLConnection.id,
+      mockPostgresConnection.id,
+    ]);
+    expect(defaultOnSelect).not.toHaveBeenCalled();
+    expect(defaultOnDelete).not.toHaveBeenCalled();
+    expect(localStorage.getItem("libredb_connections")).toBeNull();
+    unmount();
+    const restored = render(<ConnectionsList {...props} />);
+    expect(restored.getAllByRole("listitem")[0].textContent).toContain("Test MySQL");
+  });
+
+  test("supports keyboard ordering and keeps focus on the moved drag handle", () => {
+    const { getByRole, getAllByRole } = render(<ConnectionsList {...orderedProps()} />);
+    const handle = getByRole("button", { name: "Reorder Test PostgreSQL" });
+    handle.focus();
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(localStorage.getItem("libredb_connection_order")).toBeNull();
+    fireEvent.keyDown(handle, { key: "ArrowUp", altKey: true });
+    expect(localStorage.getItem("libredb_connection_order")).toBeNull();
+    fireEvent.keyDown(handle, { key: "ArrowDown", altKey: true });
+    expect(getAllByRole("listitem")[1].textContent).toContain("Test PostgreSQL");
+    expect(document.activeElement).toBe(handle);
+    fireEvent.keyDown(handle, { key: "ArrowDown", altKey: true });
+    fireEvent.keyDown(handle, { key: "ArrowUp", altKey: true });
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test PostgreSQL");
+    fireEvent.click(handle);
+    expect(defaultOnSelect).not.toHaveBeenCalled();
+  });
+
+  test("ignores external drops, cancelled drags and dropping onto the same connection", () => {
+    const { getByRole, getAllByRole } = render(<ConnectionsList {...orderedProps()} />);
+    const transfer = { setData: mock(() => {}), effectAllowed: "", dropEffect: "" };
+    const handle = getByRole("button", { name: "Reorder Test PostgreSQL" });
+    fireEvent.dragOver(getAllByRole("listitem")[1], { dataTransfer: transfer });
+    fireEvent.drop(getAllByRole("listitem")[1], { dataTransfer: transfer });
+    fireEvent.dragStart(handle, { dataTransfer: transfer });
+    fireEvent.drop(getAllByRole("listitem")[0], { dataTransfer: transfer });
+    fireEvent.dragStart(handle, { dataTransfer: transfer });
+    fireEvent.dragEnd(handle);
+    fireEvent.drop(getAllByRole("listitem")[1], { dataTransfer: transfer });
+    expect(localStorage.getItem("libredb_connection_order")).toBeNull();
+  });
+
+  test("ignores invalid or missing stored IDs and appends new connections in their original order", () => {
+    localStorage.setItem("libredb_connection_order", JSON.stringify(["missing", 42, mockMySQLConnection.id]));
+    const { getAllByRole, unmount } = render(<ConnectionsList {...orderedProps()} />);
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test MySQL");
+    unmount();
+    localStorage.setItem("libredb_connection_order", JSON.stringify({ invalid: true }));
+    const fallback = render(<ConnectionsList {...orderedProps()} />);
+    expect(fallback.getAllByRole("listitem")[0].textContent).toContain("Test PostgreSQL");
+  });
+
+  test("updates mounted lists after another browser tab changes or clears the order", () => {
+    const { getAllByRole, unmount } = render(<ConnectionsList {...orderedProps()} />);
+    localStorage.setItem("libredb_connection_order", JSON.stringify([mockMySQLConnection.id]));
+    act(() => window.dispatchEvent(new window.StorageEvent("storage", { key: "unrelated" })));
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test PostgreSQL");
+    act(() => window.dispatchEvent(new window.StorageEvent("storage", { key: "libredb_connection_order" })));
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test MySQL");
+    localStorage.clear();
+    act(() => window.dispatchEvent(new window.StorageEvent("storage", { key: null })));
+    expect(getAllByRole("listitem")[0].textContent).toContain("Test PostgreSQL");
+    unmount();
+    act(() => window.dispatchEvent(new window.StorageEvent("storage", { key: null })));
+  });
+
+  test("keeps the visible order when storage cannot save it", () => {
+    const { getByRole, getAllByRole } = render(<ConnectionsList {...orderedProps()} />);
+    const write = spyOn(localStorage, "setItem").mockImplementation(() => {
+      throw new Error("Storage unavailable");
+    });
+    try {
+      fireEvent.keyDown(getByRole("button", { name: "Reorder Test PostgreSQL" }), { key: "ArrowDown", altKey: true });
+      expect(getAllByRole("listitem")[0].textContent).toContain("Test PostgreSQL");
+    } finally {
+      write.mockRestore();
+    }
   });
 
   test('renders "Connections" header', () => {
@@ -210,7 +310,7 @@ describe("ConnectionsList", () => {
     );
 
     // First button is edit (Pencil), second is delete (Trash2)
-    const buttons = container.querySelectorAll("button");
+    const buttons = container.querySelectorAll("button:not([draggable])");
     fireEvent.click(buttons[1]!);
 
     expect(defaultOnDelete).toHaveBeenCalledTimes(1);
@@ -232,7 +332,7 @@ describe("ConnectionsList", () => {
     );
 
     // First button is edit (Pencil), second is delete (Trash2)
-    const buttons = container.querySelectorAll("button");
+    const buttons = container.querySelectorAll("button:not([draggable])");
     fireEvent.click(buttons[0]!);
 
     expect(defaultOnEdit).toHaveBeenCalledTimes(1);
@@ -252,7 +352,7 @@ describe("ConnectionsList", () => {
     );
 
     // Only the delete button remains when onEdit is not passed down
-    const buttons = container.querySelectorAll("button");
+    const buttons = container.querySelectorAll("button:not([draggable])");
     expect(buttons.length).toBe(1);
     fireEvent.click(buttons[0]!);
     expect(defaultOnDelete).toHaveBeenCalledTimes(1);
