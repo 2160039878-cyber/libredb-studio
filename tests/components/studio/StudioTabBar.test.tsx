@@ -117,6 +117,17 @@ describe("StudioTabBar", () => {
 
   // ── Close button ──────────────────────────────────────────────────────
 
+  test("offers reopening without adding a confirmation to close", () => {
+    const onReopenClosedTab = mock(() => {});
+    const props = createDefaultProps({ onReopenClosedTab, canReopenClosedTab: false });
+    const { getByRole, rerender } = render(<StudioTabBar {...props} />);
+    const reopen = getByRole("button", { name: "Reopen last closed tab" }) as HTMLButtonElement;
+    expect(reopen.disabled).toBe(true);
+    rerender(<StudioTabBar {...props} canReopenClosedTab />);
+    fireEvent.click(reopen);
+    expect(onReopenClosedTab).toHaveBeenCalledTimes(1);
+  });
+
   test("close button fires onCloseTab when multiple tabs", () => {
     const onCloseTab = mock(() => {});
     const props = createDefaultProps({ onCloseTab });

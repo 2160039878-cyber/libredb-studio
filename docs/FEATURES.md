@@ -11,6 +11,7 @@
 *   **Modern Editor Specs:** Font ligatures, smooth scrolling, bracket pair colorization, and parameter hints enabled.
 *   **Keyboard Shortcuts:** `Cmd/Ctrl + Enter` to execute, `Alt + Shift + F` to format.
 *   **Command Palette:** Quick access to tables, connections, saved queries, and actions with `Cmd/Ctrl+K`.
+*   **Reopen Closed Tab:** The undo button beside the new-tab button restores the last closed query's name, text and language. Recovery is available until another tab is closed, the connection changes or the page reloads; reopening starts with fresh execution state. Available in both the standalone app and embedded workspaces.
 
 > See [`docs/editor/`](editor/) for the editor internals — completion provider, alias resolution, and performance design.
 

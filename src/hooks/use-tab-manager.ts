@@ -44,6 +44,7 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
   const [editingTabName, setEditingTabName] = useState("");
   const [isWorkspaceHydrated, setIsWorkspaceHydrated] = useState(false);
+  const [closedTab, setClosedTab] = useState<{ workspaceKey: string; tab: PersistedTabState } | null>(null);
 
   const workspaceKey = useMemo(
     () => `${WORKSPACE_STORAGE_PREFIX}:${activeConnection?.id ?? "default"}`,
@@ -52,6 +53,7 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
   const shouldPersistWorkspace = persistWorkspace ?? process.env.NODE_ENV !== "test";
 
   const currentTab = tabs.find((t) => t.id === activeTabId) || tabs[0];
+  const canReopenClosedTab = closedTab?.workspaceKey === workspaceKey;
 
   // LOAD EFFECT — restore tabs from localStorage on connection switch
   useEffect(() => {
@@ -61,6 +63,9 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
     // load/ready handshake, not state that could be computed instead of set.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsWorkspaceHydrated(false);
+    // A closed query belongs only to the connection where it was closed.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setClosedTab(null);
     if (!shouldPersistWorkspace) return;
 
     const storage = typeof globalThis !== "undefined" && "localStorage" in globalThis ? globalThis.localStorage : null;
@@ -169,17 +174,24 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
   const closeTab = useCallback(
     (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
-      setTabs((prev) => {
-        if (prev.length === 1) return prev;
-        const newTabs = prev.filter((t) => t.id !== id);
-        if (activeTabId === id && newTabs.length > 0) {
-          setActiveTabId(newTabs[newTabs.length - 1].id);
-        }
-        return newTabs;
-      });
+      const tab = tabs.find((t) => t.id === id);
+      if (tabs.length <= 1 || !tab) return;
+      setClosedTab({ workspaceKey, tab: { id, name: tab.name, query: tab.query, type: tab.type } });
+      const newTabs = tabs.filter((t) => t.id !== id);
+      setTabs((prev) => (prev.length > 1 ? prev.filter((t) => t.id !== id) : prev));
+      if (activeTabId === id) setActiveTabId(newTabs[newTabs.length - 1].id);
     },
-    [activeTabId],
+    [tabs, activeTabId, workspaceKey],
   );
+
+  const reopenClosedTab = useCallback(() => {
+    if (!closedTab || closedTab.workspaceKey !== workspaceKey) return;
+    // A fresh ID prevents an in-flight request for the closed tab updating its replacement.
+    const tab: QueryTab = { ...closedTab.tab, id: newLocalId(), result: null, isExecuting: false };
+    setTabs((prev) => [...prev, tab]);
+    setActiveTabId(tab.id);
+    setClosedTab(null);
+  }, [closedTab, workspaceKey]);
 
   // handleTableClick takes executeQuery as callback param to avoid circular dependency
   const handleTableClick = useCallback(
@@ -251,6 +263,8 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
     setEditingTabName,
     addTab,
     closeTab,
+    reopenClosedTab,
+    canReopenClosedTab,
     updateCurrentTab,
     updateTabById,
     handleTableClick,

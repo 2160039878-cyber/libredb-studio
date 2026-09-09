@@ -3,7 +3,7 @@
 import React, { type Dispatch, type SetStateAction } from "react";
 import type { QueryTab } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { FileBraces, Hash, Plus, X } from "lucide-react";
+import { FileBraces, Hash, Plus, X, Undo2 } from "lucide-react";
 
 interface StudioTabBarProps {
   tabs: QueryTab[];
@@ -16,6 +16,8 @@ interface StudioTabBarProps {
   onSetTabs: Dispatch<SetStateAction<QueryTab[]>>;
   onCloseTab: (id: string, e: React.MouseEvent) => void;
   onAddTab: () => void;
+  onReopenClosedTab?: () => void;
+  canReopenClosedTab?: boolean;
 }
 
 export function StudioTabBar({
@@ -29,6 +31,8 @@ export function StudioTabBar({
   onSetTabs,
   onCloseTab,
   onAddTab,
+  onReopenClosedTab,
+  canReopenClosedTab = false,
 }: StudioTabBarProps) {
   // Roving tabindex (WAI-ARIA tabs pattern): arrows/Home/End move activation,
   // and focus follows the newly activated tab.
@@ -156,6 +160,18 @@ export function StudioTabBar({
       >
         <Plus strokeWidth={1.5} className="w-3.5 h-3.5" />
       </button>
+      {onReopenClosedTab && (
+        <button
+          type="button"
+          aria-label="Reopen last closed tab"
+          title="Reopen last closed tab"
+          disabled={!canReopenClosedTab}
+          className="text-fg-muted cursor-pointer hover:text-fg-bright mx-1 disabled:opacity-30 disabled:cursor-default"
+          onClick={onReopenClosedTab}
+        >
+          <Undo2 strokeWidth={1.5} className="w-3.5 h-3.5" />
+        </button>
+      )}
     </div>
   );
 }

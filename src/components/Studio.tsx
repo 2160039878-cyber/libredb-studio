@@ -563,6 +563,8 @@ export default function Studio() {
               onSetTabs={tabMgr.setTabs}
               onCloseTab={tabMgr.closeTab}
               onAddTab={tabMgr.addTab}
+              onReopenClosedTab={tabMgr.reopenClosedTab}
+              canReopenClosedTab={tabMgr.canReopenClosedTab}
             />
 
             <main className="flex-1 overflow-hidden relative">

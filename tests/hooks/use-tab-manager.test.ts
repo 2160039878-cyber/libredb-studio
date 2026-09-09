@@ -221,6 +221,98 @@ describe("useTabManager", () => {
     expect(result.current.currentTab.name).toBe("Renamed Tab");
   });
 
+  test("reopens the last closed query with its name and language, but without stale execution state", () => {
+    const { result } = renderHook(() => useTabManager({ activeConnection: null, metadata: null, schema: [] }));
+    expect(result.current.canReopenClosedTab).toBe(false);
+    act(() => result.current.reopenClosedTab());
+    expect(result.current.tabs).toHaveLength(1);
+    act(() => result.current.addTab());
+    act(() =>
+      result.current.updateCurrentTab({
+        name: "Unsaved aggregation",
+        query: '{ "find": "users" }',
+        type: "mongodb",
+        isExecuting: true,
+        result: { rows: [{ id: 1 }], fields: ["id"], rowCount: 1, executionTime: 1 },
+        isLoadingMore: true,
+        currentOffset: 50,
+      }),
+    );
+    const closed = result.current.currentTab;
+    const stopPropagation = mock(() => {});
+    act(() => result.current.closeTab(closed.id, { stopPropagation } as unknown as React.MouseEvent));
+    expect(stopPropagation).toHaveBeenCalledTimes(1);
+    expect(result.current.canReopenClosedTab).toBe(true);
+    act(() => result.current.reopenClosedTab());
+    expect(result.current.currentTab).toEqual({
+      id: expect.any(String),
+      name: closed.name,
+      query: closed.query,
+      type: "mongodb",
+      result: null,
+      isExecuting: false,
+    });
+    expect(result.current.currentTab.id).not.toBe(closed.id);
+    expect(result.current.canReopenClosedTab).toBe(false);
+    act(() => result.current.updateTabById(closed.id, { isExecuting: true }));
+    expect(result.current.currentTab.isExecuting).toBe(false);
+    act(() => result.current.reopenClosedTab());
+    expect(result.current.tabs).toHaveLength(2);
+  });
+
+  test("remembers only the last close and does not replace it when no tab was closed", () => {
+    const { result } = renderHook(() => useTabManager({ activeConnection: null, metadata: null, schema: [] }));
+    const event = { stopPropagation() {} } as React.MouseEvent;
+    act(() => result.current.closeTab("default", event));
+    expect(result.current.canReopenClosedTab).toBe(false);
+    act(() => result.current.addTab());
+    act(() => result.current.addTab());
+    const [first, second, third] = result.current.tabs;
+    act(() => result.current.closeTab(first.id, event));
+    expect(result.current.activeTabId).toBe(third.id);
+    act(() => result.current.closeTab(second.id, event));
+    act(() => result.current.closeTab("missing", event));
+    act(() => result.current.closeTab(third.id, event));
+    act(() => result.current.reopenClosedTab());
+    expect(result.current.currentTab.name).toBe(second.name);
+    expect(result.current.tabs).toHaveLength(2);
+    act(() => result.current.closeTab("missing", event));
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  test("discards the closed query when switching connections, including when persistence is disabled", () => {
+    const { result, rerender } = renderHook(
+      ({ connection }) =>
+        useTabManager({
+          activeConnection: connection,
+          metadata: null,
+          schema: [],
+          persistWorkspace: false,
+        }),
+      { initialProps: { connection: makeConnection() } },
+    );
+    act(() => result.current.addTab());
+    act(() => result.current.closeTab("default", { stopPropagation() {} } as React.MouseEvent));
+    expect(result.current.canReopenClosedTab).toBe(true);
+    rerender({ connection: makeConnection({ id: "conn-2" }) });
+    expect(result.current.canReopenClosedTab).toBe(false);
+    act(() => result.current.reopenClosedTab());
+    expect(result.current.tabs).toHaveLength(1);
+    rerender({ connection: makeConnection() });
+    expect(result.current.canReopenClosedTab).toBe(false);
+  });
+
+  test("closing a tab preserves a queued update to another tab", () => {
+    const { result } = renderHook(() => useTabManager({ activeConnection: null, metadata: null, schema: [] }));
+    act(() => result.current.addTab());
+    const closedId = result.current.activeTabId;
+    act(() => {
+      result.current.updateTabById("default", { query: "SELECT 42;" });
+      result.current.closeTab(closedId, { stopPropagation() {} } as React.MouseEvent);
+    });
+    expect(result.current.currentTab.query).toBe("SELECT 42;");
+  });
+
   test("updateTabById updates only the targeted tab query", () => {
     const { result } = renderHook(() =>
       useTabManager({
