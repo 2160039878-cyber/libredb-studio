@@ -27,8 +27,8 @@ import { asBytes, binaryText } from "./binary";
 import { jsonText } from "./json";
 
 /**
- * The characters RFC 4180 says force a field to be quoted. A field is left bare
- * otherwise, so a numeric column stays numeric to a spreadsheet.
+ * Quotes and line breaks always require quoting. The delimiter is checked
+ * separately because it is now a parameter rather than part of this pattern.
  */
 const NEEDS_QUOTING = /["\r\n]/;
 
