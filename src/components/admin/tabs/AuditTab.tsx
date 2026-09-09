@@ -35,6 +35,7 @@ import { format, subDays, startOfDay } from "date-fns";
 import { useEffectiveTheme } from "@/hooks/use-effective-theme";
 import { chartTooltipStyle } from "@/lib/charts/palette";
 import { csvRow } from "@/lib/export/csv";
+import { jsonText } from "@/lib/export/json";
 import { queryHistoryText } from "@/lib/export/query-history";
 import { downloadText } from "@/lib/export/download";
 
@@ -214,7 +215,7 @@ function OperationsAudit() {
       );
       content = [csvRow(headers), ...rows].join("\n");
     } else {
-      content = JSON.stringify(filteredEvents, null, 2);
+      content = jsonText(filteredEvents, 2);
     }
     downloadText(
       content,
