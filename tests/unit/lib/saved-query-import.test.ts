@@ -14,6 +14,28 @@ const query: SavedQuery = {
 };
 
 describe("parseSavedQueries", () => {
+  test("loading and using the browser importer never probes dynamic code evaluation", () => {
+    // A CSP violation is reported even when a library catches the EvalError.
+    // A fresh process also observes the schema's import-time capability probe.
+    const script = `
+      let evaluations = 0;
+      globalThis.Function = new Proxy(Function, {
+        construct() { evaluations++; throw new EvalError("CSP blocks eval"); },
+      });
+      const { parseSavedQueries } = await import(${JSON.stringify(import.meta.dir + "/../../../src/lib/saved-query-import.ts")});
+      const rows = parseSavedQueries(${JSON.stringify(JSON.stringify([query]))});
+      process.stdout.write(JSON.stringify({ evaluations, name: rows[0].name, date: rows[0].createdAt instanceof Date }));
+    `;
+    const processResult = Bun.spawnSync([process.execPath, "-e", script], { stdout: "pipe", stderr: "pipe" });
+    expect(new TextDecoder().decode(processResult.stderr)).toBe("");
+    expect(processResult.exitCode).toBe(0);
+    expect(JSON.parse(new TextDecoder().decode(processResult.stdout))).toEqual({
+      evaluations: 0,
+      name: query.name,
+      date: true,
+    });
+  });
+
   test("round-trips every saved field and revives both timestamps", () => {
     expect(parseSavedQueries(JSON.stringify([query], null, 2))).toEqual([query]);
     expect(parseSavedQueries("[]")).toEqual([]);
