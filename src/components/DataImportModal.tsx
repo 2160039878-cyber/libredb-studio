@@ -434,7 +434,13 @@ export function DataImportModal({ isOpen, onClose, onImport, tables, databaseTyp
                       const data = parseCSV(csvTextRef.current, hasHeader);
                       setFirstRowIsHeader(hasHeader);
                       setParsedData(data);
-                      setColumnMapping(Object.fromEntries(data.headers.map((header) => [header, header])));
+                      if (data.headers.some((header, index) => header !== parsedData.headers[index])) {
+                        // Retain both header interpretations so a round trip preserves the user's edits.
+                        setColumnMapping((mapping) => ({
+                          ...Object.fromEntries(data.headers.map((header) => [header, header])),
+                          ...mapping,
+                        }));
+                      }
                     }}
                     className="rounded border-edge bg-panel"
                   />
