@@ -90,12 +90,14 @@ describe("SavedQueries", () => {
     fireEvent.change(search, { target: { value: "Imported" } });
     mockGetSavedQueries.mockReturnValue([...mockSavedQueries, imported]);
     const input = view.getByLabelText("Import saved queries JSON") as HTMLInputElement;
+    const setInputValue = mock((_value: string) => {});
+    Object.defineProperty(input, "value", { configurable: true, set: setInputValue });
     importFile(input, JSON.stringify([imported]));
     await waitFor(() => expect(mockImportSavedQueries).toHaveBeenCalledWith([imported]));
     expect(view.getByRole("button", { name: "Imported Query" }) !== null).toBe(true);
     expect(mockToastSuccess).toHaveBeenCalledWith("Saved queries import finished", { description: "Added 1." });
     expect(search.value).toBe("Imported");
-    expect(input.value).toBe("");
+    expect(setInputValue).toHaveBeenCalledWith("");
     expect(onSelectQuery).not.toHaveBeenCalled();
   });
 
