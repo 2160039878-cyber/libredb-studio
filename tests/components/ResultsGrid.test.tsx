@@ -67,6 +67,11 @@ mock.module("@/components/results-grid/StatsBar", () => ({
       ),
       React.createElement("span", { "data-testid": "filtered-count" }, `${props.filteredRowCount} filtered`),
       React.createElement(
+        "button",
+        { onClick: props.onToggleWrap as () => void, "aria-pressed": props.wrapCells as boolean },
+        "Wrap cell text",
+      ),
+      React.createElement(
         "span",
         { "data-testid": "exec-time" },
         `EXEC TIME: ${(props.result as { executionTime?: number })?.executionTime ?? 0}ms`,
@@ -108,17 +113,21 @@ mock.module("@/components/results-grid/StatsBar", () => ({
 }));
 
 // ── Mock @tanstack/react-virtual ────────────────────────────────────────────
+const measureRows = mock(() => {});
+const measureRowElement = mock((_element: Element | null) => {});
 mock.module("@tanstack/react-virtual", () => ({
-  useVirtualizer: (opts: { count: number }) => ({
-    getVirtualItems: () =>
-      Array.from({ length: opts.count }, (_, i) => ({
-        index: i,
-        start: i * 36,
-        size: 36,
-        key: i,
-      })),
-    getTotalSize: () => opts.count * 36,
-  }),
+  useVirtualizer: ({ count, estimateSize }: { count: number; estimateSize: () => number }) => {
+    const size = estimateSize();
+    return React.useMemo(
+      () => ({
+        getVirtualItems: () => Array.from({ length: count }, (_, i) => ({ index: i, start: i * size, size, key: i })),
+        getTotalSize: () => count * size,
+        measure: measureRows,
+        measureElement: measureRowElement,
+      }),
+      [count, size],
+    );
+  },
 }));
 
 // ── Mock lucide-react icons ─────────────────────────────────────────────────
@@ -189,12 +198,120 @@ describe("ResultsGrid", () => {
   });
 
   beforeEach(() => {
+    measureRows.mockClear();
+    measureRowElement.mockClear();
     mockShouldMask.mockClear();
     mockCanToggleMasking.mockClear();
     mockCanReveal.mockClear();
     mockDetectSensitiveColumnsFromConfig.mockClear();
     mockDetectSensitiveColumnsFromConfig.mockReturnValue(new Map());
     mockShouldMask.mockReturnValue(false);
+  });
+
+  describe("cell text wrapping", () => {
+    test("wraps desktop and mobile cells with measured rows and restores the fixed layout", () => {
+      const longText = "First line\n" + "long-token".repeat(40);
+      const result: QueryResult = {
+        ...mockResult,
+        fields: ["name", "payload"],
+        rows: [
+          { name: longText, payload: { message: longText } },
+          { name: "Short", payload: null },
+        ],
+        rowCount: 2,
+      };
+      const { container, getByRole } = render(<ResultsGrid result={result} />);
+      const desktopRows = () => Array.from(container.querySelectorAll<HTMLElement>(".editor-scrollbar [data-index]"));
+      const desktopCells = () => desktopRows().flatMap((row) => Array.from(row.children) as HTMLElement[]);
+      const toggle = getByRole("button", { name: "Wrap cell text" });
+
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      expect(desktopRows().every((row) => row.style.height === "36px")).toBe(true);
+      expect(desktopCells().every((cell) => cell.classList.contains("whitespace-nowrap"))).toBe(true);
+      expect(container.querySelectorAll(".cursor-col-resize").length).toBe(2);
+
+      const resizeFirstColumn = (from: number, to: number) => {
+        fireEvent.mouseDown(container.querySelector(".cursor-col-resize")!, { clientX: from });
+        fireEvent.mouseMove(document, { clientX: to });
+        fireEvent.mouseUp(document, { clientX: to });
+      };
+      resizeFirstColumn(150, 200);
+      expect(desktopCells()[0].style.width).toBe("200px");
+      const widths = desktopCells().map((cell) => cell.style.width);
+
+      measureRows.mockClear();
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      const allRows = Array.from(container.querySelectorAll<HTMLElement>("[data-index]:not([data-testid])"));
+      expect(allRows).toHaveLength(4);
+      for (const row of allRows) {
+        expect(row.style.height).toBe("");
+        expect(measureRowElement.mock.calls.some(([element]) => element === row)).toBe(true);
+        for (const cell of Array.from(row.children)) {
+          expect(cell.classList.contains("whitespace-pre-wrap")).toBe(true);
+          expect(cell.classList.contains("[overflow-wrap:anywhere]")).toBe(true);
+          expect(cell.querySelector(".truncate") === null).toBe(true);
+        }
+      }
+      expect(desktopCells()[0].textContent).toBe(longText);
+      expect(desktopCells()[1].textContent).toBe(JSON.stringify({ message: longText }));
+      expect(desktopCells().map((cell) => cell.style.width)).toEqual(widths);
+      expect(measureRows).toHaveBeenCalled();
+
+      measureRows.mockClear();
+      resizeFirstColumn(200, 230);
+      expect(desktopCells()[0].style.width).toBe("230px");
+      expect(measureRows).toHaveBeenCalled();
+      const resizedWidths = desktopCells().map((cell) => cell.style.width);
+
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      expect(desktopRows().every((row) => row.style.height === "36px")).toBe(true);
+      expect(desktopCells().every((cell) => cell.classList.contains("whitespace-nowrap"))).toBe(true);
+      expect(desktopCells().map((cell) => cell.style.width)).toEqual(resizedWidths);
+      expect(container.querySelectorAll(".cursor-col-resize").length).toBe(2);
+    });
+
+    test("keeps masking in both tables and wraps a deliberately revealed value", () => {
+      mockShouldMask.mockReturnValue(true);
+      mockDetectSensitiveColumnsFromConfig.mockReturnValue(new Map([["email", "email"]]));
+      const { container, getByRole, getAllByTitle } = render(<ResultsGrid result={mockResult} maskingEnabled />);
+      fireEvent.click(getByRole("button", { name: "Wrap cell text" }));
+      expect(container.textContent).not.toContain("alice@example.com");
+      expect(container.textContent).toContain("***");
+
+      fireEvent.click(getAllByTitle("Reveal value (10s)")[0]);
+      const revealedCell = container.querySelectorAll(".editor-scrollbar [data-index]")[0].children[2];
+      expect(revealedCell.textContent).toBe("alice@example.com");
+      expect(revealedCell.querySelector(".truncate") === null).toBe(true);
+    });
+
+    test("wraps pending edits without changing the inline editing callback", () => {
+      const onCellChange = mock(() => {});
+      const { container, getByRole } = render(
+        <ResultsGrid
+          result={mockResult}
+          editingEnabled
+          pendingChanges={[{ rowIndex: 0, columnId: "name", originalValue: "Alice", newValue: "Pending\nname" }]}
+          onCellChange={onCellChange}
+        />,
+      );
+      fireEvent.click(getByRole("button", { name: "Wrap cell text" }));
+      const cell = container.querySelectorAll(".editor-scrollbar [data-index]")[0].children[1];
+      expect(cell.textContent).toBe("Pending\nname");
+      expect(cell.querySelector(".truncate") === null).toBe(true);
+      fireEvent.doubleClick(cell.querySelector(".cursor-text")!);
+      const input = cell.querySelector("input")!;
+      expect(input.value).toBe("Pendingname");
+      fireEvent.change(input, { target: { value: "Updated name" } });
+      fireEvent.keyDown(cell.querySelector("input")!, { key: "Enter" });
+      expect(onCellChange).toHaveBeenCalledWith({
+        rowIndex: 0,
+        columnId: "name",
+        originalValue: "Alice",
+        newValue: "Updated name",
+      });
+    });
   });
 
   // ── 1. Renders "No results" when result has empty rows ────────────────────
@@ -1061,11 +1178,9 @@ describe("ResultsGrid", () => {
   test("sorting reorders the rendered rows, not just the header indicator", () => {
     const { getAllByRole, container } = render(React.createElement(ResultsGrid, { result: mockResult }));
 
-    // `:not([data-testid])` excludes the mocked ResultCard above, which also
-    // carries data-index; only the desktop table's rows come off the table
-    // instance, and they are the ones the row model orders.
+    // Only the desktop table's rows come off the sortable table instance.
     const renderedRows = () =>
-      Array.from(container.querySelectorAll("[data-index]:not([data-testid])")).map((row) => row.textContent ?? "");
+      Array.from(container.querySelectorAll(".editor-scrollbar [data-index]")).map((row) => row.textContent ?? "");
 
     expect(renderedRows()).toHaveLength(3);
     expect(renderedRows()[0]).toContain("Alice");

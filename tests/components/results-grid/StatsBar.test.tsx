@@ -33,6 +33,34 @@ describe("results-grid/StatsBar", () => {
     cleanup();
   });
 
+  test("offers an accessible wrap toggle with controlled pressed state", () => {
+    function Toolbar() {
+      const [wrapCells, setWrapCells] = React.useState(false);
+      return (
+        <StatsBar
+          result={makeResult()}
+          filteredRowCount={2}
+          activeFilterCount={0}
+          onClearFilters={mock(() => {})}
+          viewMode="table"
+          onSetViewMode={mock(() => {})}
+          hasSensitive={false}
+          effectiveMaskingEnabled={false}
+          userCanToggle={false}
+          wrapCells={wrapCells}
+          onToggleWrap={() => setWrapCells((previous) => !previous)}
+        />
+      );
+    }
+    const { getByRole } = render(<Toolbar />);
+    const toggle = getByRole("button", { name: "Wrap cell text" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
   test("renders stats and filter summary, clears filters", () => {
     const onClearFilters = mock(() => {});
     const { queryByText } = render(

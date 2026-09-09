@@ -3,7 +3,19 @@
 import React from "react";
 import { QueryResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { ChevronDown, LayoutGrid, Table2, LoaderCircle, EyeOff, Eye, Save, X, Funnel, Lock } from "lucide-react";
+import {
+  ChevronDown,
+  LayoutGrid,
+  Table2,
+  LoaderCircle,
+  EyeOff,
+  Eye,
+  Save,
+  X,
+  Funnel,
+  Lock,
+  WrapText,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { CellChange } from "@/components/ResultsGrid";
 import { describeWarning } from "@/components/results-grid/utils";
@@ -19,6 +31,8 @@ export interface StatsBarProps {
   onClearFilters: () => void;
   viewMode: "card" | "table";
   onSetViewMode: (mode: "card" | "table") => void;
+  wrapCells?: boolean;
+  onToggleWrap?: () => void;
   // Masking props
   hasSensitive: boolean;
   effectiveMaskingEnabled: boolean;
@@ -41,6 +55,8 @@ export function StatsBar({
   onClearFilters,
   viewMode,
   onSetViewMode,
+  wrapCells = false,
+  onToggleWrap,
   hasSensitive,
   effectiveMaskingEnabled,
   userCanToggle,
@@ -85,6 +101,24 @@ export function StatsBar({
       </div>
 
       <div className="flex items-center gap-2">
+        {onToggleWrap && (
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label="Wrap cell text"
+            aria-pressed={wrapCells}
+            title={wrapCells ? "Truncate cell text" : "Wrap cell text"}
+            className={cn(
+              "h-6 px-2 text-xs gap-1",
+              wrapCells ? "text-brand bg-brand-tint/10" : "text-fg-muted",
+              viewMode === "card" && "hidden md:inline-flex",
+            )}
+            onClick={onToggleWrap}
+          >
+            <WrapText strokeWidth={1.5} className="w-3 h-3" />
+            Wrap
+          </Button>
+        )}
         {hasSensitive &&
           (userCanToggle && onToggleMasking ? (
             <Button

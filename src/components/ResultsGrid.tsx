@@ -138,6 +138,11 @@ export function ResultsGrid({
   const [editingCell, setEditingCell] = useState<{ rowIndex: number; columnId: string } | null>(null);
   const [editValue, setEditValue] = useState<string>("");
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
+  const [wrapCells, setWrapCells] = useState(false);
+  const cellOverflowClass = wrapCells
+    ? "whitespace-pre-wrap [overflow-wrap:anywhere]"
+    : "whitespace-nowrap overflow-hidden";
+  const cellContentClass = wrapCells ? "w-full min-w-0" : "truncate w-full h-full";
   const [selectedRow, setSelectedRow] = useState<{ row: Record<string, unknown>; index: number } | null>(null);
   const [columnFilters, setColumnFilters] = useState<Map<string, string>>(new Map());
   const [activeFilterCol, setActiveFilterCol] = useState<string | null>(null);
@@ -371,7 +376,7 @@ export function ResultsGrid({
         if (effectiveMaskingEnabled && sensitivePattern && val !== null && val !== undefined && !isRevealed) {
           const masked = maskValueByPattern(val, sensitivePattern);
           return (
-            <div className="truncate w-full h-full flex items-center gap-1 group/cell">
+            <div className={cn(cellContentClass, "flex items-center gap-1 group/cell")}>
               <span className="text-fg-muted italic">{masked}</span>
               {userCanReveal && (
                 <button
@@ -393,7 +398,7 @@ export function ResultsGrid({
         if (effectiveMaskingEnabled && sensitivePattern && isRevealed) {
           const { display, className } = formatCellValue(val);
           return (
-            <div className="truncate w-full h-full flex items-center gap-1">
+            <div className={cn(cellContentClass, "flex items-center gap-1")}>
               <span className={className}>{display}</span>
               <Lock strokeWidth={1.5} className="w-2.5 h-2.5 text-hue-purple/50 shrink-0" />
             </div>
@@ -410,7 +415,7 @@ export function ResultsGrid({
         // editing at all (issue #269).
         if (!editingEnabled) {
           return (
-            <div className={cn("truncate w-full h-full", pendingChange && "bg-warning-tint/10 rounded px-0.5")}>
+            <div className={cn(cellContentClass, pendingChange && "bg-warning-tint/10 rounded px-0.5")}>
               <span className={cn(className, pendingChange && "text-warning")}>{display}</span>
             </div>
           );
@@ -418,7 +423,7 @@ export function ResultsGrid({
 
         return (
           <div
-            className={cn("truncate w-full h-full cursor-text", pendingChange && "bg-warning-tint/10 rounded px-0.5")}
+            className={cn(cellContentClass, "cursor-text", pendingChange && "bg-warning-tint/10 rounded px-0.5")}
             onDoubleClick={() => {
               setEditingCell({ rowIndex: row.index, columnId: column.id });
               setEditValue(pendingChange ? pendingChange.newValue : String(val ?? ""));
@@ -447,6 +452,7 @@ export function ResultsGrid({
     revealedCells,
     userCanReveal,
     revealCell,
+    cellContentClass,
   ]);
 
   const table = useTable({
@@ -493,6 +499,13 @@ export function ResultsGrid({
     overscan: 5,
   });
 
+  const columnSizing = table.state.columnSizing;
+  useEffect(() => {
+    // Wrapped heights depend on column width and row order, including cached offscreen rows.
+    rowVirtualizer.measure();
+    mobileTableVirtualizer.measure();
+  }, [wrapCells, columnSizing, rows, result.rows, viewMode, rowVirtualizer, mobileTableVirtualizer]);
+
   if (!result || result.rows.length === 0) {
     // A warning here is the whole story: an engine can answer 200 with every
     // segment unavailable, and the stats bar that normally carries the badge is
@@ -528,6 +541,8 @@ export function ResultsGrid({
         onClearFilters={handleClearFilters}
         viewMode={viewMode}
         onSetViewMode={setViewMode}
+        wrapCells={wrapCells}
+        onToggleWrap={() => setWrapCells((previous) => !previous)}
         hasSensitive={hasSensitive}
         effectiveMaskingEnabled={effectiveMaskingEnabled}
         userCanToggle={userCanToggle}
@@ -589,6 +604,7 @@ export function ResultsGrid({
                     "h-10 px-4 flex items-center gap-1 border-r border-b border-hairline text-xs uppercase font-mono text-fg-muted bg-raised whitespace-nowrap",
                     idx === 0 && "sticky left-0 z-30 bg-raised shadow-[2px_0_8px_rgba(0,0,0,0.3)]",
                     "min-w-[120px]",
+                    wrapCells && "w-[150px] shrink-0",
                   )}
                 >
                   {field}
@@ -614,12 +630,15 @@ export function ResultsGrid({
                 <button
                   type="button"
                   key={virtualRow.index}
+                  data-index={virtualRow.index}
+                  ref={wrapCells ? (node) => mobileTableVirtualizer.measureElement(node) : undefined}
                   style={{
                     position: "absolute",
                     top: 0,
                     left: 0,
                     right: 0,
-                    height: `${virtualRow.size}px`,
+                    height: wrapCells ? undefined : 48,
+                    minHeight: 48,
                     transform: `translateY(${virtualRow.start}px)`,
                   }}
                   className="flex hover:bg-brand-tint/[0.03] transition-colors border-b border-hairline cursor-pointer text-left"
@@ -638,9 +657,12 @@ export function ResultsGrid({
                       <div
                         key={field}
                         className={cn(
-                          "h-full px-4 py-3 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden flex items-center",
+                          "px-4 py-3 border-r border-hairline text-xs font-mono flex items-center",
+                          cellOverflowClass,
+                          !wrapCells && "h-full",
                           idx === 0 && "sticky left-0 z-10 bg-sunken shadow-[2px_0_8px_rgba(0,0,0,0.3)]",
                           "min-w-[120px]",
+                          wrapCells && "w-[150px] shrink-0",
                         )}
                       >
                         <span className={className}>{displayValue}</span>
@@ -687,8 +709,10 @@ export function ResultsGrid({
                 <div
                   key={row.id}
                   data-index={virtualRow.index}
+                  ref={wrapCells ? (node) => rowVirtualizer.measureElement(node) : undefined}
                   style={{
-                    height: `${virtualRow.size}px`,
+                    height: wrapCells ? undefined : 36,
+                    minHeight: 36,
                     transform: `translateY(${virtualRow.start}px)`,
                     position: "absolute",
                     top: 0,
@@ -700,7 +724,11 @@ export function ResultsGrid({
                     <div
                       key={cell.id}
                       style={{ width: cell.column.getSize(), minWidth: cell.column.getSize() }}
-                      className="h-full px-4 py-2 border-r border-hairline text-xs font-mono whitespace-nowrap overflow-hidden group-hover:border-hairline-strong flex items-center shrink-0"
+                      className={cn(
+                        "px-4 py-2 border-r border-hairline text-xs font-mono group-hover:border-hairline-strong flex items-center shrink-0",
+                        cellOverflowClass,
+                        !wrapCells && "h-full",
+                      )}
                     >
                       {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </div>
