@@ -93,6 +93,7 @@ const CONNECTION_RELEVANCE: Record<keyof DatabaseConnection, FieldRelevance> = {
   port: "resolution",
   user: "resolution",
   password: "resolution",
+  apiKey: "resolution",
   database: "resolution",
   schema: "resolution",
   connectionString: "resolution",

@@ -282,6 +282,8 @@ interface SearchDialectSpec {
   readonly sqlQuery: string;
   /** Whether SQL should tolerate multi-valued fields. Elasticsearch supports this request option. */
   readonly fieldMultiValueLeniency: boolean;
+  /** Whether this provider implements Elasticsearch's encoded ApiKey credentials. */
+  readonly supportsApiKey: boolean;
   /** The success envelope's declared-columns key. */
   readonly columnsKey: string;
   /**
@@ -324,6 +326,7 @@ const DIALECTS: Readonly<Record<SearchDialectId, SearchDialectSpec>> = Object.fr
     sqlPath: "/_sql",
     sqlQuery: "format=json",
     fieldMultiValueLeniency: true,
+    supportsApiKey: true,
     columnsKey: "columns",
     // Elasticsearch folds the alias into `name`, so there is no separate member.
     aliasKey: null,
@@ -362,6 +365,7 @@ const DIALECTS: Readonly<Record<SearchDialectId, SearchDialectSpec>> = Object.fr
     sqlPath: "/_plugins/_sql",
     sqlQuery: "",
     fieldMultiValueLeniency: false,
+    supportsApiKey: false,
     columnsKey: "schema",
     aliasKey: "alias",
     rowsKey: "datarows",
@@ -838,9 +842,25 @@ export class SearchHttpTransport implements SearchTransport {
     // `Basic` header is IGNORED (HTTP 200), so credentials are optional and sending
     // none is the normal local case. When they are configured they are for the
     // product's security plugin, whose refusal this transport reads off the status.
-    this.authorization = config.user
-      ? `Basic ${Buffer.from(`${config.user}:${config.password ?? ""}`).toString("base64")}`
-      : undefined;
+    if (config.apiKey) {
+      if (!this.spec.supportsApiKey) {
+        throw new SearchTransportError(
+          "auth",
+          `${this.spec.label} API Key authentication is not supported by this provider.`,
+        );
+      }
+      const key = typeof config.apiKey === "string" ? config.apiKey.trim() : "";
+      const separator = key.indexOf(":");
+      const encoded = separator > 0 && separator < key.length - 1 ? Buffer.from(key).toString("base64") : key;
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
+        throw new SearchTransportError("auth", "API Key must be encoded or in id:secret format.");
+      }
+      this.authorization = `ApiKey ${encoded}`;
+    } else {
+      this.authorization = config.user
+        ? `Basic ${Buffer.from(`${config.user}:${config.password ?? ""}`).toString("base64")}`
+        : undefined;
+    }
   }
 
   /**

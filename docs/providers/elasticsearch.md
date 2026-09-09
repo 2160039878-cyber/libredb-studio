@@ -439,16 +439,33 @@ shared generator emits a `?` this provider would then decline to fill.
 
 ### 4.1 Configuration fields
 
-The form offers exactly four fields
-([`db-ui-config.ts:138`](../../src/lib/db-ui-config.ts)): `host`, `port`, `user`, `password`.
+The form offers five fields
+([`db-ui-config.ts`](../../src/lib/db-ui-config.ts)): `host`, `port`, `user`, `password`, `apiKey`.
 
 | Field | Required | Notes |
 |---|---|---|
 | `host` | **Yes** | `validate()` ([index.ts:529](../../src/lib/db/providers/sql/search/index.ts)) throws `DatabaseConfigError` — "Elasticsearch requires a host". There is no connection string to substitute for it |
 | `port` | No | Defaults to `9200` ([index.ts:151](../../src/lib/db/providers/sql/search/index.ts), and the transport applies the same floor at [http-transport.ts:99](../../src/lib/db/providers/sql/search/http-transport.ts)). One number for both schemes — see [§4.3](#43-tls) |
-| `user` / `password` | No | Sent as HTTP Basic **only when `user` is set**, for the security plugin. Measured on a node with security disabled: a bogus `Basic` header is *ignored* (HTTP 200), so credentials are genuinely optional |
+| `user` / `password` | No | Sent as HTTP Basic **when `user` is set and `apiKey` is empty**, for the security plugin. Measured on a node with security disabled: a bogus `Basic` header is *ignored* (HTTP 200), so credentials are genuinely optional |
+| `apiKey` | No | Accepts the encoded value returned by Elasticsearch or Kibana's `id:secret` form. Takes precedence over Basic credentials on SQL, cursor, schema and monitoring requests |
 | `ssl` | No | Any mode but `disable` switches the transport to `https` ([§4.3](#43-tls)) |
 | `database` | — | **Not offered, and ignored if set** — see below |
+
+API Key authentication follows the [Elasticsearch API contract](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-security-create-api-key):
+the `Authorization` header is `ApiKey <encoded>`, where `encoded` is Base64 of the UTF-8
+`id:api_key` pair. Paste the encoded value unchanged, or enter the pair and let the transport
+encode it. Clear the field to return to Basic authentication. Malformed header values are refused
+before a request; authentication errors do not include the key. Use TLS for remote credentials.
+
+The field follows the existing secret classification for encrypted server storage. Seed configs
+accept `apiKey: "${ELASTICSEARCH_API_KEY}"`; managed connection descriptors omit the key, while
+editable seeds retain it like their passwords. Changing a seed copy's key prevents resolving it
+back to the original seed. A configured least-privilege agent username/password clears the primary
+API Key when constructing that separate provider, so it cannot override the agent identity.
+
+These authentication assertions are protocol-contract tests against the real transport with fake
+HTTP responses. They do not claim a live security-enabled cluster probe; the captured cluster
+fixtures below still have security disabled.
 
 **There is no `database` field, and that is not an omission.** An index has no namespace above it, and
 this product's own SQL says so: `SHOW TABLES` reports a `catalog` of `docker-cluster` — the cluster

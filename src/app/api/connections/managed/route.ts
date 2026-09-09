@@ -33,7 +33,7 @@ export async function GET() {
 
     const sanitized = connections.map((conn) => {
       if (conn.managed) {
-        const { password, connectionString, ...rest } = conn;
+        const { password, apiKey, connectionString, ...rest } = conn;
         return rest;
       }
       return conn;

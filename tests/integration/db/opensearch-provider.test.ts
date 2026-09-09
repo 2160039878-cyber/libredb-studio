@@ -54,7 +54,7 @@ import type { DatabaseConnection, DatabaseType } from "@/lib/types";
 import { ElasticsearchProvider, OpenSearchProvider } from "@/lib/db/providers/sql/search";
 import { SearchHttpTransport } from "@/lib/db/providers/sql/search/http-transport";
 import { type SearchErrorCategory, SearchTransportError } from "@/lib/db/providers/sql/search/transport";
-import { ConnectionError, QueryError } from "@/lib/db/errors";
+import { AuthenticationError, ConnectionError, QueryError } from "@/lib/db/errors";
 
 // ============================================================================
 // Connection
@@ -420,6 +420,7 @@ const originalFetch = globalThis.fetch;
 
 let sentPaths: string[] = [];
 let sentBodies: (Record<string, unknown> | null)[] = [];
+let sentAuth: (string | null)[] = [];
 let replyFor: (path: string, body: Record<string, unknown> | null) => Reply;
 
 function ok(body: string): Reply {
@@ -469,6 +470,7 @@ function installFetch(): void {
     const body = init?.body === undefined ? null : (JSON.parse(String(init.body)) as Record<string, unknown>);
     sentPaths.push(`${url.pathname}${url.search}`);
     sentBodies.push(body);
+    sentAuth.push(new Headers(init?.headers).get("authorization"));
 
     const reply = replyFor(`${url.pathname}${url.search}`, body);
     return new Response(reply.body, {
@@ -511,6 +513,7 @@ async function faultOf(call: () => Promise<unknown>): Promise<SearchTransportErr
 beforeEach(() => {
   sentPaths = [];
   sentBodies = [];
+  sentAuth = [];
   replyFor = defaultReply;
   installFetch();
 });
@@ -524,6 +527,26 @@ afterEach(() => {
 // ============================================================================
 
 describe("OpenSearch envelope", () => {
+  test("does not apply Elasticsearch API Key authentication to OpenSearch", async () => {
+    const provider = new OpenSearchProvider(
+      makeConnection({ apiKey: "fixture-id:fixture-secret", user: "reader", password: "unused" }),
+    );
+    await expect(provider.connect()).rejects.toBeInstanceOf(AuthenticationError);
+    expect(sentPaths).toHaveLength(0);
+  });
+
+  test.each([
+    { credentials: {}, expected: null },
+    {
+      credentials: { user: "reader", password: "fixture-secret" },
+      expected: `Basic ${Buffer.from("reader:fixture-secret").toString("base64")}`,
+    },
+  ])("retains OpenSearch's existing authentication without an API Key", async ({ credentials, expected }) => {
+    const provider = new OpenSearchProvider(makeConnection(credentials));
+    await provider.connect();
+    expect(sentAuth).toEqual([expected]);
+    await provider.disconnect();
+  });
   test("reads rows out of schema/datarows, which is not where Elasticsearch puts them", async () => {
     const result = await transport().query("SELECT id, customer, total FROM probe_orders");
 

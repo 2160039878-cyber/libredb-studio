@@ -317,11 +317,17 @@ describe("db-ui-config", () => {
       test("agrees with the list it reads, for every type and every field", () => {
         // Derived rather than enumerated: the predicate must not develop an opinion of its
         // own about any engine.
-        const FIELDS = ["host", "port", "user", "password", "database", "connectionString"] as const;
+        const FIELDS = ["host", "port", "user", "password", "apiKey", "database", "connectionString"] as const;
         for (const type of ALL_TYPES) {
           for (const field of FIELDS) {
             expect(takesConnectionField(type, field)).toBe(getDBConfig(type).connectionFields.includes(field));
           }
+        }
+      });
+
+      test("offers Elasticsearch API Key authentication only for Elasticsearch", () => {
+        for (const type of ALL_TYPES) {
+          expect(takesConnectionField(type, "apiKey")).toBe(type === "elasticsearch");
         }
       });
     });

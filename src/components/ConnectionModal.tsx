@@ -87,6 +87,8 @@ export function ConnectionModal({
     setUser,
     password,
     setPassword,
+    apiKey,
+    setApiKey,
     database,
     setDatabase,
     schema,
@@ -520,6 +522,26 @@ export function ConnectionModal({
                     </div>
                   </div>
 
+                  {takesConnectionField(type, "apiKey") && (
+                    <div className="space-y-2">
+                      <Label htmlFor="apiKey" className="text-xs font-medium text-fg-muted">
+                        API Key
+                      </Label>
+                      <Input
+                        id="apiKey"
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        autoComplete="new-password"
+                        aria-describedby="apiKeyHelp"
+                        className="h-10 bg-panel border-hairline focus:border-brand-tint/50 transition-all text-xs"
+                      />
+                      <p id="apiKeyHelp" className="text-xs text-fg-muted">
+                        Paste the encoded value or id:secret from Kibana. Takes precedence over username and password;
+                        leave empty to use Basic authentication.
+                      </p>
+                    </div>
+                  )}
                   {/*
                     Only when the engine takes it. Druid and the two search engines address
                     a datasource or an index by name in the statement, and libSQL addresses

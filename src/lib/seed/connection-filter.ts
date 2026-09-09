@@ -28,6 +28,7 @@ export function filterByRoles(connections: SeedConnection[], userRoles: string[]
       database: conn.database,
       user: conn.user,
       password: conn.password,
+      apiKey: conn.apiKey,
       connectionString: conn.connectionString,
       environment: conn.environment,
       group: conn.group,

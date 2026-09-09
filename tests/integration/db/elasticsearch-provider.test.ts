@@ -899,6 +899,46 @@ describe("ElasticsearchProvider validation", () => {
     await provider.disconnect();
   });
 
+  // Protocol-contract cases, not captures from the security-disabled fixture cluster.
+  test.each(["fixture-id:fixture-secret", Buffer.from("fixture-id:fixture-secret").toString("base64")])(
+    "sends an Elasticsearch API Key on every endpoint instead of Basic credentials",
+    async (apiKey) => {
+      const provider = await connectProvider({ apiKey, user: "reader", password: "unused-basic-password" });
+      await provider.query("SELECT id FROM probe_orders");
+      await provider.getSchema();
+      await provider.getOverview();
+      expect(sent.length).toBeGreaterThan(3);
+      expect(
+        sent.every(
+          (request) => request.auth === `ApiKey ${Buffer.from("fixture-id:fixture-secret").toString("base64")}`,
+        ),
+      ).toBe(true);
+      await provider.disconnect();
+    },
+  );
+
+  test.each([" ", "ApiKey invalid", ":secret", "id:", "bad\r\nheader"])(
+    "refuses an invalid Elasticsearch API Key without sending or exposing it",
+    async (apiKey) => {
+      const provider = new ElasticsearchProvider(makeConnection({ apiKey, user: "reader", password: "unused" }));
+      const error = await provider.connect().catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(AuthenticationError);
+      expect((error as Error).message).toContain("API Key must be encoded or in id:secret format");
+      expect(sent).toHaveLength(0);
+      expect(provider.isConnected()).toBe(false);
+    },
+  );
+
+  test.each([401, 403])("does not include a rejected API Key in an authentication error", async (status) => {
+    const apiKey = "fixture-id:fixture-secret";
+    replyFor = () => fail(status, apiKey);
+    const provider = new ElasticsearchProvider(makeConnection({ apiKey }));
+    const error = await provider.connect().catch((failure: unknown) => failure);
+    expect(error).toBeInstanceOf(AuthenticationError);
+    expect((error as Error).message).not.toContain(apiKey);
+    expect((error as Error).message).not.toContain(Buffer.from(apiKey).toString("base64"));
+  });
+
   test("sends a user with no password rather than refusing the connection", async () => {
     const provider = await connectProvider({ user: "reader" });
 

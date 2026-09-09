@@ -119,6 +119,12 @@ describe("which connection a run may be started on", () => {
     expect(startableId(browserCopy(server, { password: "different" }), loaded(server))).toBeNull();
   });
 
+  test("changing an Elasticsearch API Key prevents resolving the copy to its original seed", () => {
+    const server = descriptor({ type: "elasticsearch", apiKey: "fixture-id:fixture-secret" });
+    expect(startableId(browserCopy(server), loaded(server))).toBe("seed:sales");
+    expect(startableId(browserCopy(server, { apiKey: "different:credential" }), loaded(server))).toBeNull();
+  });
+
   // The field a hand-written comparison forgets: it changes which role the agent
   // executes as, which is the whole point of the least-privilege profile (#328).
   test("a copy carrying its own agent credentials is not startable", () => {

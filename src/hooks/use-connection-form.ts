@@ -46,6 +46,7 @@ const FIELD_OWNERSHIP: Record<keyof DatabaseConnection, FieldOwnership> = {
   port: "edited",
   user: "edited",
   password: "edited",
+  apiKey: "edited",
   database: "edited",
   schema: "edited",
   connectionString: "edited",
@@ -134,6 +135,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
   const [port, setPort] = useState("5432");
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
+  const [apiKey, setApiKey] = useState("");
   const [database, setDatabase] = useState("");
   const [schema, setSchema] = useState("");
   const [isTesting, setIsTesting] = useState(false);
@@ -200,6 +202,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       setPort(editConnection.port?.toString() || getDBConfig(editConnection.type).defaultPort);
       setUser(editConnection.user || "");
       setPassword(editConnection.password || "");
+      setApiKey(editConnection.apiKey || "");
       setDatabase(editConnection.database || "");
       setSchema(editConnection.schema || "");
       setConnectionString(editConnection.connectionString || "");
@@ -276,6 +279,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
         setName("");
         setUser("");
         setPassword("");
+        setApiKey("");
         setDatabase("");
         setSchema("");
         setConnectionString("");
@@ -345,6 +349,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       ...(addressedFields.has("port") ? { port: parseInt(port) } : {}),
       ...(addressedFields.has("user") ? { user } : {}),
       ...(addressedFields.has("password") ? { password } : {}),
+      ...(addressedFields.has("apiKey") && apiKey ? { apiKey } : {}),
       ...(addressedFields.has("database") ? { database } : {}),
       ...(addressedFields.has("schema") && schema ? { schema } : {}),
       createdAt: editConnection?.createdAt || new Date(),
@@ -386,6 +391,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     port,
     user,
     password,
+    apiKey,
     database,
     schema,
     environment,
@@ -629,6 +635,8 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     setUser,
     password,
     setPassword,
+    apiKey,
+    setApiKey,
     database,
     schema,
     setDatabase,

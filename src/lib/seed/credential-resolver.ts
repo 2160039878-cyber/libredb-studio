@@ -2,7 +2,7 @@ import { logger } from "@/lib/logger";
 import type { SeedConnection } from "./types";
 
 const ENV_VAR_PATTERN = /^\$\{([A-Z_][A-Z0-9_]*)\}$/;
-const RESOLVABLE_FIELDS = ["password", "connectionString", "user", "host", "database"] as const;
+const RESOLVABLE_FIELDS = ["password", "apiKey", "connectionString", "user", "host", "database"] as const;
 
 const warnedPlaintext = new Set<string>();
 

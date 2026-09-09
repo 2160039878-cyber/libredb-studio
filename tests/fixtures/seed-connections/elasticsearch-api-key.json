@@ -1,0 +1,23 @@
+{
+  "version": "1",
+  "connections": [
+    {
+      "id": "es-managed",
+      "name": "Managed Elasticsearch",
+      "type": "elasticsearch",
+      "host": "localhost",
+      "apiKey": "${TEST_ES_API_KEY}",
+      "roles": ["admin"],
+      "managed": true
+    },
+    {
+      "id": "es-editable",
+      "name": "Editable Elasticsearch",
+      "type": "elasticsearch",
+      "host": "localhost",
+      "apiKey": "${TEST_ES_API_KEY}",
+      "roles": ["admin"],
+      "managed": false
+    }
+  ]
+}

@@ -652,7 +652,7 @@ export async function acquireExecutionProfileProvider(
   }
 
   let effectiveConnection: DatabaseConnection = credential
-    ? { ...connection, user: credential.user, password: credential.password }
+    ? { ...connection, user: credential.user, password: credential.password, apiKey: undefined }
     : connection;
 
   // The SSH tunnel is keyed by connection id and shared with the writable

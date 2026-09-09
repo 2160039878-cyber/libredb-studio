@@ -429,6 +429,13 @@ The form offers exactly four fields
 | `ssl` | No | Any mode but `disable` switches the transport to `https` ([§4.3](#43-tls)) |
 | `database` | — | **Not offered, and ignored if set** — see below |
 
+Elasticsearch's `apiKey` field is not offered for OpenSearch. If supplied programmatically, the
+provider refuses it before sending a request instead of falling back to a different identity.
+OpenSearch has its [own API key contract](https://docs.opensearch.org/latest/api-reference/security/api-keys/create/),
+which this provider does not implement. Basic authentication and connections without credentials
+retain their existing behavior; integration tests pin this boundary alongside Elasticsearch's
+encoded-key support in the shared transport.
+
 **There is no `database` field, and that is not an omission.** An index has no namespace above it, and
 this product's own SQL says so: `SHOW TABLES LIKE %` answers `TABLE_CAT` `docker-cluster` with
 `TABLE_SCHEM` **null** (measured). So a database selector would be a control with no effect, and worse,

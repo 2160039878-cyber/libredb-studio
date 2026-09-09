@@ -98,6 +98,7 @@ const mockSetHost = mock(() => {});
 const mockSetPort = mock(() => {});
 const mockSetUser = mock(() => {});
 const mockSetPassword = mock(() => {});
+const mockSetApiKey = mock((_value: string) => {});
 const mockSetDatabase = mock(() => {});
 const mockSetConnectionString = mock(() => {});
 const mockSetMongoConnectionMode = mock(() => {});
@@ -145,6 +146,8 @@ function getDefaultForm() {
     setUser: mockSetUser,
     password: "",
     setPassword: mockSetPassword,
+    apiKey: "",
+    setApiKey: mockSetApiKey,
     database: "",
     setDatabase: mockSetDatabase,
     connectionString: "",
@@ -242,7 +245,7 @@ const MOCK_CONNECTION_FIELDS: Record<string, string[]> = {
   duckdb: ["database"],
   libsql: ["host", "port", "password", "connectionString"],
   druid: ["host", "port", "user", "password"],
-  elasticsearch: ["host", "port", "user", "password"],
+  elasticsearch: ["host", "port", "user", "password", "apiKey"],
   opensearch: ["host", "port", "user", "password"],
 };
 const mockFields = (type: string): string[] =>
@@ -310,6 +313,7 @@ describe("ConnectionModal", () => {
 
   beforeEach(() => {
     mockFormOverrides = {};
+    mockSetApiKey.mockClear();
     mockSetType.mockClear();
     mockSetName.mockClear();
     mockSetHost.mockClear();
@@ -319,6 +323,27 @@ describe("ConnectionModal", () => {
     mockHandleTestConnection.mockClear();
     mockHandleConnect.mockClear();
   });
+
+  test("offers a secret API Key input with both accepted forms for Elasticsearch", () => {
+    mockFormOverrides = { type: "elasticsearch", apiKey: "fixture-id:fixture-secret" };
+    const view = render(<ConnectionModal {...createDefaultProps()} />);
+    const input = view.getByLabelText("API Key") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(input.autocomplete).toBe("new-password");
+    expect(input.value).toBe("fixture-id:fixture-secret");
+    expect(view.getByText(/encoded.*id:secret/).textContent).toContain("Takes precedence over username and password");
+    fireEvent.change(input, { target: { value: "updated:secret" } });
+    expect(mockSetApiKey).toHaveBeenCalledWith("updated:secret");
+  });
+
+  test.each(["postgres", "opensearch"])(
+    "does not offer Elasticsearch API Key authentication to other engines",
+    (type) => {
+      mockFormOverrides = { type };
+      const view = render(<ConnectionModal {...createDefaultProps()} />);
+      expect(view.queryByLabelText("API Key") === null).toBe(true);
+    },
+  );
 
   // ── 1. Does not render when isOpen=false ────────────────────────────────────
 

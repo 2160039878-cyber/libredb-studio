@@ -1019,14 +1019,21 @@ describe("acquireExecutionProfileProvider", () => {
   });
 
   test("uses the least-privilege agent credential for the profile provider only", async () => {
-    const conn = pgConn({ id: "pg-cred", agentUser: "agent_ro", agentPassword: "agent-secret" });
+    const conn = pgConn({
+      id: "pg-cred",
+      apiKey: "fixture-id:privileged-secret",
+      agentUser: "agent_ro",
+      agentPassword: "agent-secret",
+    });
 
     const agent = await acquireExecutionProfileProvider(conn, "agent-read-only");
     const shared = await getOrCreateProvider(conn);
 
     expect(agent.config.user).toBe("agent_ro");
     expect(agent.config.password).toBe("agent-secret");
+    expect(agent.config.apiKey).toBeUndefined();
     expect(shared.config.user).toBe("test");
+    expect(shared.config.apiKey).toBe("fixture-id:privileged-secret");
   });
 
   test("denies when the agent credential is configured but unresolvable (fail closed)", async () => {

@@ -149,6 +149,8 @@ export interface DatabaseConnection {
   port?: number;
   user?: string;
   password?: string;
+  /** Elasticsearch API Key: encoded credentials or id:secret. Takes precedence over Basic auth. */
+  apiKey?: string;
   database?: string;
   /** Trino: the session schema used to resolve unqualified table names. */
   schema?: string;

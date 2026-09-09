@@ -37,6 +37,7 @@ function fullConnection(): DatabaseConnection {
     port: 5432,
     user: "app",
     password: "CANARY-DB-PASSWORD",
+    apiKey: "CANARY-API-KEY",
     database: "prod",
     connectionString: "postgres://app:CANARY-IN-URL@db.internal:5432/prod",
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
@@ -64,6 +65,7 @@ function fullConnection(): DatabaseConnection {
 
 const CANARIES = [
   "CANARY-DB-PASSWORD",
+  "CANARY-API-KEY",
   "CANARY-IN-URL",
   "CANARY-TLS-CLIENT-KEY",
   "CANARY-SSH-PASSWORD",
@@ -84,6 +86,7 @@ describe("the classification is exhaustive by construction", () => {
       [
         "agentPassword",
         "agentUser",
+        "apiKey",
         // MongoDB's auth database. A database NAME, so `public`; the password
         // checked against it is the secret and is classified below.
         "authSource",
@@ -114,7 +117,7 @@ describe("the classification is exhaustive by construction", () => {
     );
   });
 
-  test("exactly the seven credential-bearing fields are classified secret", () => {
+  test("exactly the eight credential-bearing fields are classified secret", () => {
     const secrets = [
       ...Object.keys(CONNECTION_FIELDS).filter((k) => CONNECTION_FIELDS[k as never] === "secret"),
       ...Object.keys(SSL_FIELDS)
@@ -128,6 +131,7 @@ describe("the classification is exhaustive by construction", () => {
     expect(secrets).toEqual(
       [
         "agentPassword",
+        "apiKey",
         "connectionString",
         "password",
         "ssl.clientKey",
@@ -158,6 +162,7 @@ describe("encryptConnections", () => {
     const prefix = `${ENVELOPE_VERSION}:`;
 
     expect(encrypted.password?.startsWith(prefix)).toBe(true);
+    expect(encrypted.apiKey?.startsWith(prefix)).toBe(true);
     expect(encrypted.connectionString?.startsWith(prefix)).toBe(true);
     expect(encrypted.agentPassword?.startsWith(prefix)).toBe(true);
     expect(encrypted.ssl?.clientKey?.startsWith(prefix)).toBe(true);
@@ -266,8 +271,8 @@ describe("decryptConnections", () => {
     resetStorageEncryptionKey();
     const result = decryptConnections(encrypted);
 
-    // Seven unreadable fields on one record.
-    expect(result.undecryptable).toBe(7);
+    // Eight unreadable fields on one record.
+    expect(result.undecryptable).toBe(8);
     // The record SURVIVES. Dropping it would be persisted as a deletion by the write-through
     // cache on the next sync, destroying ciphertext a restored key could still have opened.
     expect(result.connections).toHaveLength(1);
@@ -275,6 +280,7 @@ describe("decryptConnections", () => {
     expect(result.connections[0].host).toBe("db.internal");
     // And the field is ABSENT, never the raw envelope: "v1:..." must never reach a driver.
     expect("password" in result.connections[0]).toBe(false);
+    expect("apiKey" in result.connections[0]).toBe(false);
     expect(result.connections[0].sshTunnel?.privateKey).toBeUndefined();
     expect(JSON.stringify(result.connections)).not.toContain(ENVELOPE_VERSION + ":");
   });
@@ -285,7 +291,7 @@ describe("decryptConnections", () => {
     process.env.JWT_SECRET = "a-different-secret-that-cannot-open-it";
     resetStorageEncryptionKey();
 
-    expect(decryptConnections(encrypted).undecryptable).toBe(14);
+    expect(decryptConnections(encrypted).undecryptable).toBe(16);
   });
 
   test("an empty list is not an error", () => {

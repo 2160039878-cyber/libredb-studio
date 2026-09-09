@@ -34,6 +34,7 @@ export interface DatabaseUIConfig {
     | "port"
     | "user"
     | "password"
+    | "apiKey"
     | "database"
     | "schema"
     | "connectionString"
@@ -220,7 +221,7 @@ export const DB_UI_CONFIG: Record<DatabaseType, DatabaseUIConfig> = {
     // database selector would be a control with no effect. Credentials stay offered
     // because a cluster running the security plugin needs them; a stock node ignores
     // the Authorization header entirely (measured).
-    connectionFields: ["host", "port", "user", "password"],
+    connectionFields: ["host", "port", "user", "password", "apiKey"],
   },
   opensearch: {
     icon: OpenSearchIcon,

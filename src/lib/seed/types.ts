@@ -63,6 +63,7 @@ export const SeedConnectionSchema = z.object({
   database: z.string().optional(),
   user: z.string().optional(),
   password: z.string().optional(),
+  apiKey: z.string().optional(),
   connectionString: z.string().optional(),
   environment: ConnectionEnvironmentSchema.optional(),
   group: z.string().max(64).optional(),

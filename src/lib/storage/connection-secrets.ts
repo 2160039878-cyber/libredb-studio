@@ -24,6 +24,7 @@ export const CONNECTION_FIELDS: Record<keyof DatabaseConnection, FieldClass> = {
   port: "public",
   user: "public",
   password: "secret",
+  apiKey: "secret",
   database: "public",
   // Carries scheme://user:pass@host. The same shape src/lib/audit.ts redacts out of log lines.
   connectionString: "secret",

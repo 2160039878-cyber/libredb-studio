@@ -53,6 +53,29 @@ describe("GET /api/connections/managed", () => {
     }
   });
 
+  it("resolves seeded API Keys and exposes them only for editable connections", async () => {
+    const originalPath = process.env.SEED_CONFIG_PATH;
+    const originalKey = process.env.TEST_ES_API_KEY;
+    process.env.SEED_CONFIG_PATH = path.join(FIXTURES, "elasticsearch-api-key.json");
+    process.env.TEST_ES_API_KEY = "fixture-id:fixture-secret";
+    resetCache();
+    try {
+      const response = await GET();
+      expect(response.status).toBe(200);
+      const { connections } = await response.json();
+      const managed = connections.find((connection: { seedId: string }) => connection.seedId === "es-managed");
+      const editable = connections.find((connection: { seedId: string }) => connection.seedId === "es-editable");
+      expect(managed).toBeDefined();
+      expect(managed.apiKey).toBeUndefined();
+      expect(editable.apiKey).toBe("fixture-id:fixture-secret");
+    } finally {
+      process.env.SEED_CONFIG_PATH = originalPath;
+      if (originalKey === undefined) delete process.env.TEST_ES_API_KEY;
+      else process.env.TEST_ES_API_KEY = originalKey;
+      resetCache();
+    }
+  });
+
   it("returns 401 when no session", async () => {
     (getSession as ReturnType<typeof mock>).mockImplementation(() => null);
     const res = await GET();

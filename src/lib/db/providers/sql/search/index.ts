@@ -603,18 +603,16 @@ abstract class SearchProvider extends SQLBaseProvider {
   }
 
   public async connect(): Promise<void> {
-    const transport = new SearchHttpTransport(this.product.dialect, this.config);
-
     try {
+      const transport = new SearchHttpTransport(this.product.dialect, this.config);
       await transport.query(CONNECT_PROBE_SQL, this.deadline());
+      this.transport = transport;
+      this.setConnected(true);
     } catch (error) {
       const failure = this.describeConnectFailure(error);
       this.setError(failure);
       throw failure;
     }
-
-    this.transport = transport;
-    this.setConnected(true);
   }
 
   /**

@@ -34,7 +34,7 @@ const MOCK_CONNECTION_FIELDS: Record<string, string[]> = {
   // convenience.
   redis: ["host", "port", "user", "password", "database"],
   druid: ["host", "port", "user", "password"],
-  elasticsearch: ["host", "port", "user", "password"],
+  elasticsearch: ["host", "port", "user", "password", "apiKey"],
   opensearch: ["host", "port", "user", "password"],
 };
 const mockFields = (type: string): string[] =>
@@ -81,6 +81,60 @@ describe("useConnectionForm", () => {
 
   afterEach(() => {
     restoreGlobalFetch();
+  });
+
+  test("edits, probes, saves and clears an Elasticsearch API Key", async () => {
+    const onConnect = mock((_connection: DatabaseConnection) => {});
+    const onTestConnection = mock(async (_connection: DatabaseConnection) => ({ success: true }));
+    const editConnection: DatabaseConnection = {
+      id: "es-edit",
+      name: "Elasticsearch",
+      type: "elasticsearch",
+      host: "localhost",
+      port: 9200,
+      apiKey: "fixture-id:old-secret",
+      createdAt: new Date(0),
+    };
+    const { result } = renderHook(() =>
+      useConnectionForm({ ...defaultProps, editConnection, onConnect, onTestConnection }),
+    );
+    expect(result.current.apiKey).toBe(editConnection.apiKey!);
+    act(() => result.current.setApiKey("fixture-id:new-secret"));
+    await act(async () => {
+      await result.current.handleTestConnection();
+      await result.current.handleConnect();
+    });
+    expect(onTestConnection).toHaveBeenCalledTimes(2);
+    expect(onTestConnection.mock.calls.every(([connection]) => connection.apiKey === "fixture-id:new-secret")).toBe(
+      true,
+    );
+    expect(onConnect.mock.calls[0][0].apiKey).toBe("fixture-id:new-secret");
+    act(() => result.current.setApiKey(""));
+    await act(async () => {
+      await result.current.handleConnect();
+    });
+    expect(onConnect.mock.calls[1][0].apiKey).toBeUndefined();
+  });
+
+  test("does not carry an API Key into another engine or a reopened blank form", async () => {
+    const onConnect = mock((_connection: DatabaseConnection) => {});
+    const onTestConnection = mock(async (_connection: DatabaseConnection) => ({ success: true }));
+    const { result, rerender } = renderHook(
+      ({ isOpen }) => useConnectionForm({ ...defaultProps, isOpen, onConnect, onTestConnection }),
+      { initialProps: { isOpen: true } },
+    );
+    act(() => {
+      result.current.setType("elasticsearch");
+      result.current.setApiKey("fixture-id:fixture-secret");
+    });
+    act(() => result.current.setType("opensearch"));
+    await act(async () => {
+      await result.current.handleConnect();
+    });
+    expect(onConnect.mock.calls[0][0].apiKey).toBeUndefined();
+    rerender({ isOpen: false });
+    rerender({ isOpen: true });
+    expect(result.current.apiKey).toBe("");
   });
 
   // ── Default State ──────────────────────────────────────────────────────────
