@@ -3,6 +3,7 @@ import { mockToastSuccess, mockToastError } from "../helpers/mock-sonner";
 import "../helpers/mock-navigation";
 
 import { mock } from "bun:test";
+import { DEFAULT_MASKING_CONFIG, type MaskingConfig } from "@/lib/data-masking";
 
 // Build mock config that matches the shape from the real module
 const mockConfig = {
@@ -31,7 +32,11 @@ const mockConfig = {
   },
 };
 
-const mockSaveMaskingConfig = mock(() => {});
+// Keep the real preset definitions before replacing persistence for this isolated group.
+const realDefaults = DEFAULT_MASKING_CONFIG;
+const presetConfig = structuredClone(realDefaults);
+
+const mockSaveMaskingConfig = mock((_config: MaskingConfig) => {});
 const mockLoadMaskingConfig = mock(() => structuredClone(mockConfig));
 
 mock.module("@/lib/data-masking", () => ({
@@ -403,6 +408,68 @@ describe("MaskingSettings", () => {
   });
 
   // ── handleDialogSave — validation ────────────────────────────────────
+
+  test.each(["Email", "Phone", "Credit Card", "SSN"])(
+    "adds an editable %s preset without changing existing patterns",
+    (name) => {
+      const preset = presetConfig.patterns.find((pattern) => pattern.name === name)!;
+      const { container, baseElement } = render(<MaskingSettings />);
+      const view = within(container);
+      fireEvent.click(view.getByText("Add Pattern"));
+      fireEvent.click(within(baseElement).getByRole("button", { name: `Add ${preset.name} preset` }));
+      expect(within(baseElement).queryByText("Add Masking Pattern")).toBeNull();
+      expect(mockSaveMaskingConfig).not.toHaveBeenCalled();
+      fireEvent.click(view.getByText("Save Config"));
+
+      const saved = mockSaveMaskingConfig.mock.calls.at(-1)![0];
+      expect(saved.patterns.slice(0, 2)).toEqual(mockConfig.patterns);
+      expect(saved.roleSettings).toEqual(mockConfig.roleSettings);
+      const added = saved.patterns.at(-1)!;
+      expect(added).toMatchObject({
+        name: preset.name,
+        maskType: preset.maskType,
+        columnPatterns: preset.columnPatterns,
+        enabled: true,
+        isBuiltin: false,
+      });
+      expect(added.id).not.toBe(preset.id);
+      expect(added.columnPatterns).not.toBe(preset.columnPatterns);
+
+      const editButtons = container.querySelectorAll(".lucide-pencil");
+      fireEvent.click(editButtons[editButtons.length - 1].closest("button")!);
+      expect(within(baseElement).queryByText("Add from preset")).toBeNull();
+      fireEvent.change(within(baseElement).getByLabelText("Name"), { target: { value: "Team pattern" } });
+      fireEvent.change(within(baseElement).getByLabelText("Column Patterns (one per line)"), {
+        target: { value: "team_contact" },
+      });
+      fireEvent.click(within(baseElement).getByRole("button", { name: "Save" }));
+      fireEvent.click(view.getByText("Save Config"));
+      const edited = mockSaveMaskingConfig.mock.calls.at(-1)![0];
+      expect(edited.patterns.at(-1)).toMatchObject({
+        id: added.id,
+        name: "Team pattern",
+        columnPatterns: ["team_contact"],
+      });
+      expect(edited.patterns.slice(0, 2)).toEqual(mockConfig.patterns);
+      expect(realDefaults).toEqual(presetConfig);
+    },
+  );
+
+  test("adding the same preset twice creates independently removable patterns", () => {
+    const { container, baseElement } = render(<MaskingSettings />);
+    const view = within(container);
+    for (let i = 0; i < 2; i++) {
+      fireEvent.click(view.getByText("Add Pattern"));
+      fireEvent.click(within(baseElement).getByRole("button", { name: "Add Email preset" }));
+    }
+    fireEvent.click(view.getByText("Save Config"));
+    const saved = mockSaveMaskingConfig.mock.calls.at(-1)![0];
+    expect(new Set(saved.patterns.map((pattern) => pattern.id)).size).toBe(4);
+    const deleteButtons = container.querySelectorAll("button.text-danger");
+    fireEvent.click(deleteButtons[deleteButtons.length - 1]);
+    fireEvent.click(view.getByText("Save Config"));
+    expect(mockSaveMaskingConfig.mock.calls.at(-1)![0].patterns).toEqual(saved.patterns.slice(0, -1));
+  });
 
   test("dialog save with empty name shows error toast", () => {
     const { container, baseElement } = render(<MaskingSettings />);

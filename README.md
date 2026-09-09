@@ -214,7 +214,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 ### Display Masking (Preview)
 - **Client-Side Display Layer**: Masks sensitive values in the browser UI — useful for screen sharing, demos, and reducing accidental on-screen exposure. **Not server-enforced**; query API responses still contain full values for authenticated users.
 - **Column-Name Pattern Matching**: 10 built-in patterns (email, phone, credit card, SSN, password, IP, date, financial, and more) match **result column headers** by regex. Works when the output name matches (e.g., `SELECT salary`). Aliases (`salary AS x`) and aggregates (`SUM(salary)`) are not masked today.
-- **Configurable Rules**: Admin panel to add, edit, enable/disable masking patterns. Custom patterns with regex support. Settings stored per-browser in localStorage.
+- **Configurable Rules**: Admin panel to add, edit, enable/disable masking patterns. The Add Pattern dialog offers editable email, phone, credit card and SSN presets alongside custom patterns with regex support. Settings stored per-browser in localStorage.
 - **RBAC UI Controls**: User role cannot toggle or reveal masked cells in the UI. Admin role can toggle masking and temporarily reveal individual cells (10s auto-hide).
 - **Export & Clipboard**: CSV, JSON, and SQL INSERT exports use masked display values when masking is active in the UI. This does not prevent access to raw data via the API, browser DevTools, or admin reveal.
 - **UI Coverage**: Grid, mobile card/table views, row detail sheet, and clipboard copy respect the active display mask.
