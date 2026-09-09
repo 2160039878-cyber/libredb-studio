@@ -35,6 +35,7 @@ import { format, subDays, startOfDay } from "date-fns";
 import { useEffectiveTheme } from "@/hooks/use-effective-theme";
 import { chartTooltipStyle } from "@/lib/charts/palette";
 import { csvRow } from "@/lib/export/csv";
+import { queryHistoryText } from "@/lib/export/query-history";
 import { downloadText } from "@/lib/export/download";
 
 interface AuditExportProps {
@@ -369,26 +370,11 @@ function QueryAudit() {
   }, [history, searchQuery, statusFilter]);
 
   const exportHistory = (format: "csv" | "json") => {
-    let content: string;
-    if (format === "csv") {
-      const headers = ["Executed At", "Status", "Connection", "Tab", "Execution Time (ms)", "Rows", "Query", "Error"];
-      const rows = filteredHistory.map((item) =>
-        csvRow([
-          item.executedAt,
-          item.status,
-          item.connectionName || item.connectionId,
-          item.tabName || "",
-          item.executionTime,
-          item.rowCount || 0,
-          item.query,
-          item.errorMessage || "",
-        ]),
-      );
-      content = [csvRow(headers), ...rows].join("\n");
-    } else {
-      content = JSON.stringify(filteredHistory, null, 2);
-    }
-    downloadText(content, format === "csv" ? "text/csv" : "application/json", `query_history_${Date.now()}.${format}`);
+    downloadText(
+      queryHistoryText(filteredHistory, format),
+      format === "csv" ? "text/csv" : "application/json",
+      `query_history_${Date.now()}.${format}`,
+    );
   };
 
   const successCount = history.filter((h) => h.status === "success").length;
