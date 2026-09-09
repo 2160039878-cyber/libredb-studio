@@ -9,7 +9,8 @@
 *   **Custom DB Theme:** Specialized `db-dark` theme for high-contrast SQL syntax highlighting.
 *   **Power Snippets:** Integrated templates for CTEs, Joins, and complex CRUD operations.
 *   **Modern Editor Specs:** Font ligatures, smooth scrolling, bracket pair colorization, and parameter hints enabled.
-*   **Keyboard Shortcuts:** `Cmd/Ctrl + Enter` to execute, `Alt + Shift + F` to format.
+*   **Execution Scope:** **RUN** executes the full editor buffer regardless of selection or cursor position. **Run Sel** executes the selected text. `Cmd/Ctrl + Enter` executes the selection, or the statement at the cursor when nothing is selected; EXPLAIN keeps this same scope. Standalone SQL scripts use the existing sequential multi-query path and stop on the first error, without starting a transaction automatically. The embedded workspace delegates the chosen text to its host callback. Dangerous-query confirmation still checks the complete submitted text.
+*   **Keyboard Shortcuts:** `Cmd/Ctrl + Enter` to execute the selection/current statement, `Alt + Shift + F` to format.
 *   **Command Palette:** Quick access to tables, connections, saved queries, and actions with `Cmd/Ctrl+K`.
 
 > See [`docs/editor/`](editor/) for the editor internals — completion provider, alias resolution, and performance design.

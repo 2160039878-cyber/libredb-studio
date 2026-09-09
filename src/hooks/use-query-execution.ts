@@ -215,10 +215,11 @@ export function useQueryExecution({
       const targetTabId = tabId || activeTabId;
       const tabToExec = tabsRef.current.find((t) => t.id === targetTabId) || currentTabRef.current;
 
-      // Modern Execution Logic: Prioritize selection from ref, then override, then tab state
+      // RUN reads the full live buffer. Run Sel / Ctrl+Enter supply an explicit
+      // statement; EXPLAIN still targets the selection or statement at the cursor.
       let queryToExecute = overrideQuery;
       if (!queryToExecute && targetTabId === activeTabId && queryEditorRef.current) {
-        queryToExecute = queryEditorRef.current.getEffectiveQuery();
+        queryToExecute = isExplain ? queryEditorRef.current.getEffectiveQuery() : queryEditorRef.current.getValue();
       }
       if (!queryToExecute) {
         queryToExecute = tabToExec.query;

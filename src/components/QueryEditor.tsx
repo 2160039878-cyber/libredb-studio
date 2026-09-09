@@ -48,6 +48,8 @@ interface QueryEditorProps {
   onChange?: (val: string) => void;
   /** Called when content changes in real-time. Use sparingly as it triggers on every keystroke. */
   onContentChange?: (val: string) => void;
+  /** Execute the selection/current statement through the embedding host. */
+  onExecute?: (query: string) => void;
   onExplain?: () => void;
   language?: "sql" | "json" | "libredb" | "redis";
   /**
@@ -109,12 +111,27 @@ const getEditorOptions = (showLineNumbers: boolean) => ({
 
 export const QueryEditor = forwardRef<QueryEditorRef, QueryEditorProps>(
   (
-    { value, onChange, onContentChange, onExplain, language = "sql", databaseType, schemaContext, capabilities },
+    {
+      value,
+      onChange,
+      onContentChange,
+      onExecute,
+      onExplain,
+      language = "sql",
+      databaseType,
+      schemaContext,
+      capabilities,
+    },
     ref,
   ) => {
     const monaco = useMonacoInstance();
     const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
     const [hasSelection, setHasSelection] = useState(false);
+    // Monaco registers keyboard actions once; read the host's current callback.
+    const executeHandlerRef = useRef(onExecute);
+    useEffect(() => {
+      executeHandlerRef.current = onExecute;
+    }, [onExecute]);
 
     // Both themes are defined in `beforeMount`; this only picks which is applied.
     // Monaco re-reads the `theme` prop on change, so the switch needs no remount.
@@ -532,6 +549,10 @@ export const QueryEditor = forwardRef<QueryEditorRef, QueryEditorProps>(
 
       const { query, range } = getEffectiveQuery();
       flashHighlight(range);
+      if (executeHandlerRef.current) {
+        executeHandlerRef.current(query);
+        return;
+      }
       const event = new CustomEvent("execute-query", { detail: { query } });
       window.dispatchEvent(event);
     };

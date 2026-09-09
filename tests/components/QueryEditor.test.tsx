@@ -876,6 +876,34 @@ describe("QueryEditor", () => {
     window.removeEventListener("execute-query", handler);
   });
 
+  test("Run Sel and the mounted shortcut use the latest host execution callback", () => {
+    mockUseMonacoReturn = { Range: class {} };
+    mockSelectionReturn = { isEmpty: () => false };
+    mockSelectedText = "SELECT selected";
+    const first = mock(() => {});
+    const next = mock(() => {});
+    const globalRun = mock(() => {});
+    window.addEventListener("execute-query", globalRun);
+    try {
+      const { getByText, rerender } = render(<QueryEditor {...createDefaultProps({ onExecute: first })} />);
+      const mountedShortcut = capturedCommands[0].handler;
+      act(() => {
+        capturedSelectionCb?.();
+      });
+      fireEvent.click(getByText("Run Sel"));
+      expect(first).toHaveBeenCalledWith("SELECT selected");
+      rerender(<QueryEditor {...createDefaultProps({ onExecute: next })} />);
+      act(() => {
+        mountedShortcut();
+      });
+      expect(next).toHaveBeenCalledWith("SELECT selected");
+      expect(first).toHaveBeenCalledTimes(1);
+      expect(globalRun).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("execute-query", globalRun);
+    }
+  });
+
   // -----------------------------------------------------------------------
   // flashHighlight — decoration creation and cleanup
   // -----------------------------------------------------------------------

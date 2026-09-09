@@ -200,6 +200,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 
 ### Pro Data Management
 - **Universal Data Grid**: Virtualized rendering (TanStack) for millions of rows.
+- **Script Execution**: **RUN** executes the full editor buffer; **Run Sel** and `Cmd/Ctrl+Enter` execute the selection (or the current statement when no text is selected). Standalone SQL scripts use the existing sequential multi-query path and stop on the first error; no transaction is started automatically.
 - **Inline Editing**: Double-click to update values directly in the grid, on engines whose SQL has a single-table row update (the control is hidden elsewhere).
 - **Column Filtering**: Per-column text filters on query results for instant data exploration.
 - **Interactive Pivot Table**: Client-side pivoting with 5 aggregation functions (COUNT, SUM, AVG, MIN, MAX) and SQL generation.

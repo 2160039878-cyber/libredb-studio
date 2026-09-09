@@ -941,15 +941,14 @@ describe("useQueryExecution", () => {
     expect(result.current.pendingUnlimitedQuery).toBeNull();
   });
 
-  // ── executeQuery uses queryEditorRef.getEffectiveQuery when available ──
-
-  test("executeQuery uses queryEditorRef.getEffectiveQuery when no override", async () => {
+  test("executeQuery reads the full current editor buffer when no override", async () => {
     const fetchMock = mockGlobalFetch({
       "/api/db/query": { ok: true, json: mockQueryResult },
     });
     const mockEditorRef = {
       current: {
-        getEffectiveQuery: () => "SELECT id FROM users WHERE active = true",
+        getValue: () => "SELECT id FROM users WHERE active = true",
+        getEffectiveQuery: () => "SELECT selected",
         focus: () => {},
       },
     };
@@ -967,6 +966,87 @@ describe("useQueryExecution", () => {
     expect(queryCall).toBeDefined();
     const body = JSON.parse(queryCall![1]!.body as string);
     expect(body.sql).toBe("SELECT id FROM users WHERE active = true");
+  });
+
+  test.each(["SELECT * FROM sample.demo", "SELECT 1"])(
+    "Run All ignores the selection or cursor statement %s and submits the complete script",
+    async (effectiveQuery) => {
+      const sql =
+        "CREATE SCHEMA IF NOT EXISTS sample; CREATE TABLE IF NOT EXISTS sample.demo (id INT PRIMARY KEY); INSERT INTO sample.demo VALUES (1); SELECT * FROM sample.demo;";
+      const fetchMock = mockGlobalFetch({
+        "/api/db/multi-query": {
+          ok: true,
+          json: { ...mockQueryResult, multiStatement: true, statements: [], hasError: false },
+        },
+        "/api/db/query": { ok: true, json: mockQueryResult },
+      });
+      const getEffectiveQuery = mock(() => effectiveQuery);
+      const params = createDefaultParams({ queryEditorRef: { current: { getValue: () => sql, getEffectiveQuery } } });
+      const { result } = renderHook(() => useQueryExecution(params));
+      await act(async () => {
+        await result.current.executeQuery();
+      });
+      const calls = fetchMock.mock.calls.filter((call) => String(call[0]).includes("/api/db/multi-query"));
+      expect(calls).toHaveLength(1);
+      expect(JSON.parse(calls[0][1]!.body as string).sql).toBe(sql);
+      expect(getEffectiveQuery).not.toHaveBeenCalled();
+    },
+  );
+
+  test("Run All checks the entire script before sending any statement", async () => {
+    const sql = "DROP TABLE users; SELECT 1;";
+    const fetchMock = mockGlobalFetch({});
+    const params = createDefaultParams({
+      queryEditorRef: {
+        current: {
+          getValue: () => sql,
+          getEffectiveQuery: () => "SELECT 1",
+        },
+      },
+    });
+    const { result } = renderHook(() => useQueryExecution(params));
+    await act(async () => {
+      await result.current.executeQuery();
+    });
+    expect(result.current.safetyCheckQuery).toBe(sql);
+    expect(isDangerousQueryMock).toHaveBeenLastCalledWith(sql, "postgres");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  test("an explicit selected query takes precedence over the full editor buffer", async () => {
+    const fetchMock = mockGlobalFetch({ "/api/db/query": { ok: true, json: mockQueryResult } });
+    const getValue = mock(() => "DROP TABLE users; SELECT 1;");
+    const params = createDefaultParams({ queryEditorRef: { current: { getValue } } });
+    const { result } = renderHook(() => useQueryExecution(params));
+    await act(async () => {
+      await result.current.executeQuery("SELECT 1");
+    });
+    const queryCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/db/query"));
+    expect(JSON.parse(queryCall![1]!.body as string).sql).toBe("SELECT 1");
+    expect(result.current.safetyCheckQuery).toBeNull();
+    expect(getValue).not.toHaveBeenCalled();
+  });
+
+  test("EXPLAIN still reads the selection or current statement", async () => {
+    const fetchMock = mockGlobalFetch({ "/api/db/query": { ok: true, json: mockQueryResult } });
+    const getValue = mock(() => "CREATE TABLE demo (id INT); SELECT id FROM demo;");
+    const params = createDefaultParams({
+      queryEditorRef: {
+        current: {
+          getValue,
+          getEffectiveQuery: () => "SELECT id FROM demo",
+        },
+      },
+    });
+    const { result } = renderHook(() => useQueryExecution(params));
+    await act(async () => {
+      await result.current.executeQuery(undefined, undefined, true);
+    });
+    const queryCall = fetchMock.mock.calls.find((call) => String(call[0]).includes("/api/db/query"));
+    const body = JSON.parse(queryCall![1]!.body as string);
+    expect(body.sql).toBe("SELECT id FROM demo");
+    expect(body.explain).toEqual({ mode: "analyze" });
+    expect(getValue).not.toHaveBeenCalled();
   });
 
   // ── executeQuery falls back to tab query when no override and no ref ────

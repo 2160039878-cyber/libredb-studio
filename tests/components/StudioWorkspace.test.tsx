@@ -830,6 +830,13 @@ describe("StudioWorkspace", () => {
     expect(capturedQueryToolbarProps.onToggleEditing).toBeUndefined();
   });
 
+  test("editor selection executes through the workspace adapter with an explicit query", () => {
+    renderWorkspace();
+    expect(typeof capturedQueryEditorProps.onExecute).toBe("function");
+    act(() => (capturedQueryEditorProps.onExecute as (query: string) => void)("SELECT selected"));
+    expect(mockExecuteQuery).toHaveBeenCalledWith("SELECT selected");
+  });
+
   test("toolbar onImport opens the import modal which delegates and closes", () => {
     const { queryByTestId } = renderWorkspace();
     expect(queryByTestId("dataimportmodal")).toBeNull();
