@@ -14,7 +14,8 @@ import { Toaster } from "@/components/ui/sonner";
 
 export const metadata: Metadata = {
   title: "LibreDB Studio | Universal Database Editor",
-  description: "Manage PostgreSQL, MySQL, MongoDB, and Redis in one web-based interface.",
+  description:
+    "A self-hosted, web-based SQL IDE for PostgreSQL, MySQL, MongoDB and more, with AI-assisted queries, schema exploration, and support for SQL and NoSQL engines.",
   icons: {
     icon: [
       { url: withBasePath("/favicon.ico?v=2"), sizes: "any" },
