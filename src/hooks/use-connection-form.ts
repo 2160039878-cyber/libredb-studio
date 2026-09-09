@@ -30,13 +30,14 @@ import { newLocalId } from "@/lib/ids";
  * A `Record<keyof DatabaseConnection, ...>` rather than a list of names to copy, for
  * the reason `connection-secrets.ts` gives about credentials: the failure mode of a
  * list is silence, and silence is exactly how this bug survived. A field added to
- * `DatabaseConnection` now fails `bun run typecheck` until someone decides whether the
- * editor owns it.
+ * `DatabaseConnection`, `SSLConfig` or `SSHTunnelConfig` now fails `bun run typecheck`
+ * until someone decides whether the editor owns it.
  *
  * `edited` is not "always written" — the form omits a value it has none for, which is
  * how turning TLS or the tunnel off actually clears them. It means the FORM decides.
+ * `conditional` is preserved only while the related form setting remains unchanged.
  */
-type FieldOwnership = "edited" | "preserved";
+type FieldOwnership = "edited" | "preserved" | "conditional";
 
 const FIELD_OWNERSHIP: Record<keyof DatabaseConnection, FieldOwnership> = {
   id: "edited",
@@ -50,7 +51,8 @@ const FIELD_OWNERSHIP: Record<keyof DatabaseConnection, FieldOwnership> = {
   schema: "edited",
   connectionString: "edited",
   createdAt: "edited",
-  color: "edited",
+  // Preserve a custom color while the environment is unchanged; otherwise use its palette.
+  color: "conditional",
   environment: "edited",
   ssl: "edited",
   sshTunnel: "edited",
@@ -65,19 +67,39 @@ const FIELD_OWNERSHIP: Record<keyof DatabaseConnection, FieldOwnership> = {
   agentPassword: "preserved",
 };
 
-const PRESERVED_KEYS = (Object.keys(FIELD_OWNERSHIP) as (keyof DatabaseConnection)[]).filter(
-  (key) => FIELD_OWNERSHIP[key] === "preserved",
-);
+const SSL_OWNERSHIP: Record<keyof SSLConfig, FieldOwnership> = {
+  mode: "edited",
+  caCert: "edited",
+  clientCert: "edited",
+  clientKey: "edited",
+  rejectUnauthorized: "preserved",
+};
+
+const SSH_TUNNEL_OWNERSHIP: Record<keyof SSHTunnelConfig, FieldOwnership> = {
+  enabled: "edited",
+  host: "edited",
+  port: "edited",
+  username: "edited",
+  authMethod: "edited",
+  password: "edited",
+  privateKey: "edited",
+  passphrase: "edited",
+  hostKeyFingerprint: "preserved",
+};
 
 /** What survives an edit untouched. Empty for a new connection, which has no past. */
-function preservedFields(source: DatabaseConnection | null | undefined): Partial<DatabaseConnection> {
+function preservedFields<T extends object>(
+  source: T | null | undefined,
+  ownership: Record<keyof T, FieldOwnership>,
+): Partial<T> {
   if (!source) return {};
-  const carried: Record<string, unknown> = {};
-  for (const key of PRESERVED_KEYS) {
+  const carried: Partial<T> = {};
+  for (const key of Object.keys(ownership) as (keyof T)[]) {
+    if (ownership[key] !== "preserved") continue;
     const value = source[key];
     if (value !== undefined) carried[key] = value;
   }
-  return carried as Partial<DatabaseConnection>;
+  return carried;
 }
 
 interface UseConnectionFormProps {
@@ -303,9 +325,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
             ...(caCert ? { caCert } : {}),
             ...(clientCert ? { clientCert } : {}),
             ...(clientKey ? { clientKey } : {}),
-            ...(editConnection?.ssl?.mode === sslMode && editConnection.ssl.rejectUnauthorized !== undefined
-              ? { rejectUnauthorized: editConnection.ssl.rejectUnauthorized }
-              : {}),
+            ...(editConnection?.ssl?.mode === sslMode ? preservedFields(editConnection.ssl, SSL_OWNERSHIP) : {}),
           }
         : undefined;
 
@@ -320,10 +340,8 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
           ...(sshAuthMethod === "privateKey" ? { privateKey: sshPrivateKey } : {}),
           ...(sshPassphrase ? { passphrase: sshPassphrase } : {}),
           // A pinned host key belongs to this SSH endpoint, not to a replacement bastion.
-          ...(editConnection?.sshTunnel?.host === sshHost &&
-          editConnection.sshTunnel.port === (parseInt(sshPort) || 22) &&
-          editConnection.sshTunnel.hostKeyFingerprint
-            ? { hostKeyFingerprint: editConnection.sshTunnel.hostKeyFingerprint }
+          ...(editConnection?.sshTunnel?.host === sshHost && editConnection.sshTunnel.port === (parseInt(sshPort) || 22)
+            ? preservedFields(editConnection.sshTunnel, SSH_TUNNEL_OWNERSHIP)
             : {}),
         }
       : undefined;
@@ -345,8 +363,8 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     const addressedFields = new Set<string>(getDBConfig(type).connectionFields);
 
     return {
-      // First, so a form-owned field always wins; nothing below is preserved.
-      ...preservedFields(editConnection),
+      // First, so a form-owned field always wins.
+      ...preservedFields(editConnection, FIELD_OWNERSHIP),
       id: editConnection?.id || newLocalId(),
       name: name || `${type}-connection`,
       type,
