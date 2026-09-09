@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect } from "react";
-import { Columns3, GripVertical, ArrowRight } from "lucide-react";
+import { Columns3, GripVertical, ArrowRight, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DatabaseType, QueryResult } from "@/lib/types";
 import { quoteLiteral } from "@/lib/sql/values";
 import { quoteIdentifier } from "@/lib/sql/identifier";
+import { csvRow } from "@/lib/export/csv";
+import { downloadText } from "@/lib/export/download";
 
 interface PivotTableProps {
   result: QueryResult | null;
@@ -222,6 +224,30 @@ export function PivotTable({ result, onLoadQuery, databaseType }: PivotTableProp
             </button>
           ))}
         </div>
+
+        {pivotData && rowField && (
+          <button
+            onClick={() => {
+              const headers = [
+                rowField,
+                ...pivotData.colKeys.map((key) =>
+                  key === "__all__" ? `${AGG_LABELS[aggFunction]}(${valueField || "*"})` : key,
+                ),
+              ];
+              const rows = pivotData.pivotRows.map((row) =>
+                csvRow([row.rowKey, ...pivotData.colKeys.map((key) => row.values.get(key) || "0")]),
+              );
+              downloadText(
+                [csvRow(headers), ...rows].join("\n"),
+                "text/csv",
+                `pivot-${new Date().toISOString().slice(0, 10)}.csv`,
+              );
+            }}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium text-fg-muted hover:text-brand hover:bg-brand-tint/10 transition-colors"
+          >
+            <Download strokeWidth={1.5} className="w-3 h-3" /> Export CSV
+          </button>
+        )}
 
         {onLoadQuery && rowField && (
           <button

@@ -3,7 +3,7 @@ import "../helpers/mock-sonner";
 import "../helpers/mock-navigation";
 
 import React from "react";
-import { afterEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { cleanup, render, fireEvent } from "@testing-library/react";
 import { PivotTable, aggregate } from "@/components/PivotTable";
 import type { QueryResult } from "@/lib/types";
@@ -23,6 +23,89 @@ const result: QueryResult = {
 describe("PivotTable", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  describe("CSV export", () => {
+    let downloads: Blob[];
+    let filenames: string[];
+    let restoreDownloads: () => void;
+
+    beforeEach(() => {
+      downloads = [];
+      filenames = [];
+      const createUrl = spyOn(URL, "createObjectURL").mockImplementation((blob) => {
+        downloads.push(blob as Blob);
+        return `blob:pivot-export-${downloads.length}`;
+      });
+      const revokeUrl = spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+      const click = spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.isConnected).toBe(true);
+        filenames.push(this.download);
+      });
+      restoreDownloads = () => {
+        click.mockRestore();
+        createUrl.mockRestore();
+        revokeUrl.mockRestore();
+      };
+    });
+
+    afterEach(async () => {
+      // Let the shared download helper's deferred revocation use its own spy.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      restoreDownloads();
+    });
+
+    test("exports the default displayed table through the shared download path", async () => {
+      const { getByRole } = render(<PivotTable result={result} />);
+      fireEvent.click(getByRole("button", { name: "Export CSV" }));
+      expect(downloads).toHaveLength(1);
+      expect(downloads[0].type).toBe("text/csv");
+      expect(filenames[0]).toMatch(/^pivot-\d{4}-\d{2}-\d{2}\.csv$/);
+      expect((await downloads[0].text()).replace(/^\uFEFF/, "")).toBe("dept,COUNT(salary)\nEngineering,2\nSales,2");
+    });
+
+    test("exports the currently selected columns and aggregation including empty intersections", async () => {
+      const { container, getByRole } = render(<PivotTable result={result} />);
+      fireEvent.change(container.querySelectorAll("select")[1], { target: { value: "status" } });
+      fireEvent.click(getByRole("button", { name: "SUM" }));
+      fireEvent.click(getByRole("button", { name: "Export CSV" }));
+      expect((await downloads[0].text()).replace(/^\uFEFF/, "")).toBe(
+        "dept,active,inactive\nEngineering,90000.00,85000.00\nSales,145000.00,0",
+      );
+
+      fireEvent.click(getByRole("button", { name: "AVG" }));
+      fireEvent.click(getByRole("button", { name: "Export CSV" }));
+      expect((await downloads[1].text()).replace(/^\uFEFF/, "")).toBe(
+        "dept,active,inactive\nEngineering,90000.00,85000.00\nSales,72500.00,0",
+      );
+    });
+
+    test("escapes headers and row labels and retains the shared formula protection", async () => {
+      const quotedResult: QueryResult = {
+        ...result,
+        fields: ["group", "category", "amount"],
+        rows: [
+          { group: 'R&D,\n"東京"', category: 'A,"B"', amount: -12.5 },
+          { group: "=1+1", category: 'A,"B"', amount: 2 },
+        ],
+        rowCount: 2,
+      };
+      const { container, getByRole } = render(<PivotTable result={quotedResult} />);
+      fireEvent.change(container.querySelectorAll("select")[1], { target: { value: "category" } });
+      fireEvent.click(getByRole("button", { name: "SUM" }));
+      fireEvent.click(getByRole("button", { name: "Export CSV" }));
+      expect((await downloads[0].text()).replace(/^\uFEFF/, "")).toBe(
+        'group,"A,""B"""\n"\'=1+1",2.00\n"R&D,\n""東京""",-12.50',
+      );
+    });
+
+    test("offers no export when no pivot is configured", () => {
+      const { container, getByRole, queryByRole } = render(<PivotTable result={result} />);
+      expect(getByRole("button", { name: "Export CSV" })).toBeDefined();
+      fireEvent.change(container.querySelectorAll("select")[0], { target: { value: "" } });
+      expect(queryByRole("button", { name: "Export CSV" }) === null).toBe(true);
+      expect(downloads).toHaveLength(0);
+    });
   });
 
   test("shows empty state when result is null", () => {
