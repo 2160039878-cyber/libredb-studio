@@ -21,10 +21,12 @@ const mockStorage = {
   })),
   getThresholdConfig: mock(() => []),
   getDismissedSeeds: mock(() => ["seed-1"]),
+  getFavoriteConnectionIds: mock(() => ["favorite-1"]),
 };
 
 const ALL_COLLECTIONS = [
   "connections",
+  "favorite_connections",
   "history",
   "saved_queries",
   "schema_snapshots",
@@ -289,12 +291,24 @@ describe("useStorageSync", () => {
       expect(mockStorage.getMaskingConfig).toHaveBeenCalled();
       expect(mockStorage.getThresholdConfig).toHaveBeenCalled();
       expect(mockStorage.getDismissedSeeds).toHaveBeenCalled();
+      expect(mockStorage.getFavoriteConnectionIds).toHaveBeenCalled();
     });
   });
 
   // ── Pull from server ──────────────────────────────────────────────────
 
   describe("pull from server", () => {
+    test.each([{ favorites: [] }, { favorites: ["server-favorite"] }, { favorites: undefined }])(
+      "restores favorite preferences from the server",
+      async ({ favorites }) => {
+        localStorage.setItem("libredb_server_migrated", "true");
+        localStorage.setItem("libredb_favorite_connections", '["old"]');
+        setupServerMode({ "/api/storage": { ok: true, status: 200, json: { favorite_connections: favorites } } });
+        const { result } = renderHook(() => useStorageSync());
+        await waitFor(() => expect(result.current.isReady).toBe(true));
+        expect(JSON.parse(localStorage.getItem("libredb_favorite_connections")!)).toEqual(favorites ?? []);
+      },
+    );
     test("pulls data from server on mount in server mode", async () => {
       localStorage.setItem("libredb_server_migrated", "true");
       const fetchMock = setupServerMode();
@@ -400,6 +414,24 @@ describe("useStorageSync", () => {
   // ── Push to server (debounced) ────────────────────────────────────────
 
   describe("push to server", () => {
+    test("pushes favorite IDs through the existing authenticated storage path", async () => {
+      localStorage.setItem("libredb_server_migrated", "true");
+      const fetchMock = setupServerMode({
+        "/api/storage/favorite_connections": { ok: true, status: 200, json: { ok: true } },
+      });
+      const { result } = renderHook(() => useStorageSync());
+      await waitFor(() => expect(result.current.isReady).toBe(true));
+      act(() =>
+        window.dispatchEvent(
+          new CustomEvent("libredb-storage-change", { detail: { collection: "favorite_connections" } }),
+        ),
+      );
+      await waitFor(() => expect(calledPaths(fetchMock)).toContain("/api/storage/favorite_connections"));
+      const call = (fetchMock.mock.calls as unknown[][]).find(([url]) =>
+        String(url).endsWith("/api/storage/favorite_connections"),
+      )!;
+      expect(JSON.parse((call[1] as RequestInit).body as string)).toEqual({ data: ["favorite-1"] });
+    });
     test("pushes collection to server on storage-change event", async () => {
       localStorage.setItem("libredb_server_migrated", "true");
       const fetchMock = mockGlobalFetch({

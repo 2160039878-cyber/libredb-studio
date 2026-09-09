@@ -67,6 +67,19 @@ export const storage = {
     return readJSON<string[]>("dismissed_seeds") ?? [];
   },
 
+  getFavoriteConnectionIds: (): string[] => {
+    const data = readJSON<unknown>("favorite_connections");
+    return Array.isArray(data) ? data.filter((id): id is string => typeof id === "string") : [];
+  },
+
+  toggleConnectionFavorite: (id: string): boolean => {
+    const favorites = storage.getFavoriteConnectionIds();
+    const next = favorites.includes(id) ? favorites.filter((favorite) => favorite !== id) : [...favorites, id];
+    if (!writeJSON("favorite_connections", next)) return false;
+    dispatchChange("favorite_connections", next);
+    return true;
+  },
+
   deleteConnection: (id: string) => {
     const connections = storage.getConnections();
     const target = connections.find((c) => c.id === id);

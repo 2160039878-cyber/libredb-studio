@@ -27,20 +27,6 @@ mock.module("@/lib/storage/factory", () => ({
   getStorageProvider: async () => (providerEnabled ? mockProvider : null),
 }));
 
-mock.module("@/lib/storage/types", () => ({
-  STORAGE_COLLECTIONS: [
-    "connections",
-    "history",
-    "saved_queries",
-    "schema_snapshots",
-    "saved_charts",
-    "active_connection_id",
-    "audit_log",
-    "masking_config",
-    "threshold_config",
-  ],
-}));
-
 // ── Import routes ────────────────────────────────────────────────────────────
 
 import { GET } from "@/app/api/storage/route";
@@ -126,6 +112,13 @@ describe("PUT /api/storage/[collection]", () => {
     const res = await makeRequest("connections", data);
     expect(res.status).toBe(200);
     expect(mockProvider.setCollection).toHaveBeenCalledWith("admin@test.com", "connections", data);
+  });
+
+  test("stores favorites under the authenticated user's identity", async () => {
+    mockSession = { username: "reader@test.com", role: "user" };
+    const res = await makeRequest("favorite_connections", ["managed"]);
+    expect(res.status).toBe(200);
+    expect(mockProvider.setCollection).toHaveBeenCalledWith("reader@test.com", "favorite_connections", ["managed"]);
   });
 
   test("returns 400 when data field is missing", async () => {

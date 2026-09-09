@@ -1,6 +1,6 @@
 import React from "react";
 import { DatabaseConnection, ENVIRONMENT_LABELS } from "@/lib/types";
-import { Lock, Trash2, Pencil } from "lucide-react";
+import { Lock, Trash2, Pencil, Star } from "lucide-react";
 import { getDBIcon } from "@/lib/db-ui-config";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -12,6 +12,8 @@ interface ConnectionItemProps {
   onSelect: (conn: DatabaseConnection) => void;
   onDelete: (id: string) => void;
   onEdit?: (conn: DatabaseConnection) => void;
+  isFavorite?: boolean;
+  onToggleFavorite?: (id: string) => void;
 }
 
 export const ConnectionItem = React.memo(function ConnectionItem({
@@ -20,6 +22,8 @@ export const ConnectionItem = React.memo(function ConnectionItem({
   onSelect,
   onDelete,
   onEdit,
+  isFavorite = false,
+  onToggleFavorite,
 }: ConnectionItemProps) {
   return (
     <motion.div
@@ -91,6 +95,20 @@ export const ConnectionItem = React.memo(function ConnectionItem({
             }}
           >
             <Trash2 strokeWidth={1.5} className="w-3 h-3" />
+          </button>
+        )}
+        {onToggleFavorite && (
+          <button
+            type="button"
+            aria-label={isFavorite ? `Remove ${conn.name} from favorites` : `Add ${conn.name} to favorites`}
+            aria-pressed={isFavorite}
+            className={cn("p-1 rounded hover:bg-accent transition-colors", isFavorite && "text-hue-amber")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(conn.id);
+            }}
+          >
+            <Star strokeWidth={1.5} className={cn("w-3 h-3", isFavorite && "fill-current")} />
           </button>
         )}
       </div>

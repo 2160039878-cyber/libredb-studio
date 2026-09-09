@@ -30,7 +30,7 @@ FAIL=0
 # green summary line reported a group count no run had.
 # Drifted again before this line was touched: it read 30 while 32 `run_group` calls
 # existed, so every green run reported a group count no run had. 33 is the grep below.
-TOTAL_GROUPS=34
+TOTAL_GROUPS=35
 EXTRA_BUN_ARGS=("$@")
 GROUP_INDEX=0
 COVERAGE_MODE=0
@@ -273,7 +273,6 @@ run_group "Group 15/16: Remaining components" \
   tests/components/schema-explorer/SchemaExplorer.test.tsx \
   tests/components/schema-explorer/ColumnList.test.tsx \
   tests/components/sidebar/ConnectionItem.test.tsx \
-  tests/components/sidebar/ConnectionsList.test.tsx \
   tests/components/studio/QueryToolbar.test.tsx \
   tests/components/studio/StudioTabBar.test.tsx \
   tests/components/admin/OverviewTab.test.tsx \
@@ -324,6 +323,11 @@ run_group "Group 20: WireCompatibilityHint" \
 # It also installs a global ResizeObserver, which Radix mounts on the viewport.
 run_group "Group 21: ui/scroll-area" \
   tests/components/ui/scroll-area.test.tsx
+
+# ConnectionsList reads real stored preferences. The admin suites in Group 15/16
+# replace the storage facade, so it must run in its own process.
+run_group "Group 22: ConnectionsList preferences" \
+  tests/components/sidebar/ConnectionsList.test.tsx
 
 # Summary
 echo ""

@@ -41,6 +41,42 @@ function makeAuditEvent(overrides: Partial<AuditEvent> = {}): AuditEvent {
 
 // ── CustomEvent dispatch ─────────────────────────────────────────────────────
 
+describe("storage facade: connection favorites", () => {
+  beforeEach(() => localStorage.clear());
+
+  test.each([
+    ["null", []],
+    ["{}", []],
+    ["invalid JSON", []],
+    ['[null,1,"a",false,"b"]', ["a", "b"]],
+  ])("ignores invalid favorite preference data %s", (data, expected) => {
+    localStorage.setItem("libredb_favorite_connections", data);
+    expect(storage.getFavoriteConnectionIds()).toEqual(expected);
+  });
+
+  test("toggles IDs without changing stored connection settings and publishes the preference", () => {
+    storage.saveConnection(makeConnection());
+    const original = localStorage.getItem("libredb_connections");
+    const listener = mock((_event: Event) => {});
+    window.addEventListener("libredb-storage-change", listener);
+    try {
+      expect(storage.getFavoriteConnectionIds()).toEqual([]);
+      expect(storage.toggleConnectionFavorite("conn-1")).toBe(true);
+      expect(storage.toggleConnectionFavorite("managed")).toBe(true);
+      expect(storage.getFavoriteConnectionIds()).toEqual(["conn-1", "managed"]);
+      expect(storage.toggleConnectionFavorite("conn-1")).toBe(true);
+      expect(storage.getFavoriteConnectionIds()).toEqual(["managed"]);
+      expect((listener.mock.calls.at(-1)![0] as CustomEvent).detail).toEqual({
+        collection: "favorite_connections",
+        data: ["managed"],
+      });
+      expect(localStorage.getItem("libredb_connections")).toBe(original);
+    } finally {
+      window.removeEventListener("libredb-storage-change", listener);
+    }
+  });
+});
+
 describe("storage facade: CustomEvent dispatch", () => {
   beforeEach(() => {
     localStorage.clear();

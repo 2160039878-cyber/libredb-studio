@@ -9,6 +9,8 @@ import type { ThresholdConfig } from "../monitoring-thresholds";
  */
 export interface StorageData {
   connections: DatabaseConnection[];
+  /** User preferences, including favorites for administrator-managed connections. */
+  favorite_connections: string[];
   history: QueryHistoryItem[];
   saved_queries: SavedQuery[];
   schema_snapshots: SchemaSnapshot[];
@@ -27,6 +29,7 @@ export type StorageCollection = keyof StorageData;
 /** All persistable collection names */
 export const STORAGE_COLLECTIONS: StorageCollection[] = [
   "connections",
+  "favorite_connections",
   "history",
   "saved_queries",
   "schema_snapshots",
