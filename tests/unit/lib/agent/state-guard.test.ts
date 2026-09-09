@@ -342,7 +342,7 @@ describe("assertPersistableState — CREDENTIAL_KEY", () => {
     // matters - no credential stem matches it, so the derivation is its only
     // cover.
     expect(new Set(STORED_SECRET_FIELDS)).toEqual(
-      new Set(["password", "connectionString", "agentPassword", "clientKey", "privateKey", "passphrase"]),
+      new Set(["password", "apiKey", "connectionString", "agentPassword", "clientKey", "privateKey", "passphrase"]),
     );
   });
 

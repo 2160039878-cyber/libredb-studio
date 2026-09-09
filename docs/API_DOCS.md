@@ -1220,7 +1220,7 @@ Auth required. Merges a client's localStorage payload into server storage on fir
 
 #### GET /api/connections/managed
 
-Auth required. Returns seed/managed connections for the current user's role, with secrets (`password`, `connectionString`) stripped. `cacheHint` is the client cache TTL in ms (`SEED_CACHE_TTL_MS`, default 60000). See [`docs/SEED_CONNECTIONS.md`](SEED_CONNECTIONS.md).
+Auth required. Returns seed/managed connections for the current user's role, with secrets (`password`, `apiKey`, `connectionString`) stripped from managed connections. Editable seeds include their credentials so they can be copied and edited. `cacheHint` is the client cache TTL in ms (`SEED_CACHE_TTL_MS`, default 60000). See [`docs/SEED_CONNECTIONS.md`](SEED_CONNECTIONS.md).
 
 ```json
 { "connections": [], "cacheHint": 60000 }
@@ -1268,7 +1268,7 @@ Body `{ "connections": [...] }`; returns per-connection health `{ "results": [{ 
 
 The object is one shape on the wire. Fields the server reads from a request body — and that
 change how a connection is opened — are the coordinates and credentials (`id`, `name`, `type`,
-`host`, `port`, `user`, `password`, `database`, `schema`, `connectionString`), plus `ssl`,
+`host`, `port`, `user`, `password`, `apiKey`, `database`, `schema`, `connectionString`), plus `ssl`,
 `sshTunnel`, `serviceName` (Oracle), `instanceName` (MSSQL), `localDataCenter` (Cassandra),
 `authSource` (MongoDB), `agentUser`, and `agentPassword`. `color`, `environment`, `group`,
 `managed`, `seedId`, and `createdAt` are client-side bookkeeping that travel in the same object.
@@ -1282,6 +1282,7 @@ interface DatabaseConnection {
   port?: number;           // Port number
   user?: string;           // Username
   password?: string;       // Password
+  apiKey?: string;         // Elasticsearch: encoded API key or id:secret; secret-classified
   database?: string;       // Database name (Couchbase: the bucket; Druid: unused, it has one catalog; Trino: the CATALOG; Cassandra: the KEYSPACE)
   schema?: string;         // Trino: session schema for unqualified table names
   connectionString?: string; // Full connection string (alternative; Druid has no URI form, host + port only; Cassandra has none either, no URI carries localDataCenter)
