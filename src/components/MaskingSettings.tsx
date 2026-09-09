@@ -10,7 +10,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Shield, Plus, Pencil, Trash2, RotateCcw, Save, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { newLocalId } from "@/lib/ids";
 import {
   type MaskingConfig,
   type MaskingPattern,
@@ -103,16 +102,11 @@ export function MaskingSettings() {
     setIsDialogOpen(true);
   }, []);
 
-  const addPreset = useCallback((preset: MaskingPattern) => {
-    const pattern: MaskingPattern = {
-      ...preset,
-      id: `custom-${newLocalId()}`,
-      columnPatterns: [...preset.columnPatterns],
-      enabled: true,
-      isBuiltin: false,
-    };
-    setConfig((prev) => ({ ...prev, patterns: [...prev.patterns, pattern] }));
-    setIsDialogOpen(false);
+  const prefillPreset = useCallback((preset: MaskingPattern) => {
+    setEditName(preset.name);
+    setEditMaskType(preset.maskType);
+    setEditColumnPatterns(preset.columnPatterns.join("\n"));
+    setEditCustomMask(preset.customMask || "");
   }, []);
 
   const handleDialogSave = useCallback(() => {
@@ -364,21 +358,21 @@ export function MaskingSettings() {
           <div className="space-y-4 py-4">
             {isNewPattern && (
               <div className="space-y-2">
-                <p className="text-xs font-medium text-fg-secondary">Add from preset</p>
+                <p className="text-xs font-medium text-fg-secondary">Start from a preset</p>
                 <div className="flex flex-wrap gap-2">
                   {MASKING_PRESETS.map((preset) => (
                     <Button
                       key={preset.id}
                       variant="outline"
                       size="sm"
-                      aria-label={`Add ${preset.name} preset`}
-                      onClick={() => addPreset(preset)}
+                      aria-label={`Use ${preset.name} preset`}
+                      onClick={() => prefillPreset(preset)}
                     >
                       {preset.name}
                     </Button>
                   ))}
                 </div>
-                <p className="text-xs text-fg-muted">Adds an editable copy, or fill in a custom pattern below.</p>
+                <p className="text-xs text-fg-muted">Review and edit the column patterns before saving.</p>
               </div>
             )}
             <div className="space-y-2">
