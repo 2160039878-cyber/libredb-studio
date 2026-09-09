@@ -215,16 +215,33 @@ number for a more convincing one.
 
 ### 3.1.1 What counts as a table
 
-`CTE_TABLES_INFO` filters `table_type IN ('BASE TABLE', 'MATERIALIZED VIEW')` — a positive list,
-not "anything that is not a view", so a `FOREIGN` or `SYSTEM VIEW` row still stays out.
+`CTE_TABLES_INFO` filters `table_type IN ('BASE TABLE', 'MATERIALIZED VIEW', 'VIEW')`, so ordinary
+views appear beside tables while `FOREIGN` and `SYSTEM VIEW` rows stay out.
 `MATERIALIZED VIEW` is on it for Materialize, which reports its materialized views through
 `information_schema.tables` under that type and whose users work with them rather than with base
 tables: listing only `BASE TABLE` hid the engine's central object while showing its plain tables.
 
-It is a measured no-op everywhere else. PostgreSQL leaves materialized views out of
-`information_schema.tables` altogether — its `table_type` is only `BASE TABLE`, `VIEW`, `FOREIGN` or
-`LOCAL TEMPORARY` — and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni and CockroachDB were each
-asked on a live instance and emit no such row (CockroachDB's third value is `SYSTEM VIEW`).
+PostgreSQL leaves materialized views out of both `information_schema.tables` and
+`information_schema.columns`. The schema queries supplement those catalogs with `pg_class`
+(`relkind = 'm'`) and `pg_attribute`, preserving column order and using `format_type` for type
+modifiers. Existing information-schema rows are excluded from that supplement to avoid duplicates.
+The overview uses the same relation filter, so its count includes the same visible objects.
+
+The supplement follows information-schema visibility: owning-role membership, table privileges,
+or column privileges make a relation visible; columns are filtered by their own privileges.
+System and extension-owned schemas remain excluded. A wire-compatible engine that reports a
+missing PostgreSQL catalog column or privilege/type function retries without the marked catalog
+unions and retains its information-schema discovery. Permission errors are not treated as missing
+catalogs. This is in addition to the existing syntax, size, JSON and catalog fallbacks above.
+
+Ordinary views have no estimated row count. A materialized view created `WITH NO DATA` is listed
+with its columns but no row count; selecting it still returns PostgreSQL's error until it has
+been populated with `REFRESH MATERIALIZED VIEW`. The explorer does not execute a refresh.
+
+References: PostgreSQL's [information-schema implementation](https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/catalog/information_schema.sql),
+[`pg_class`](https://www.postgresql.org/docs/current/catalog-pg-class.html),
+[`pg_attribute`](https://www.postgresql.org/docs/current/catalog-pg-attribute.html), and
+[privilege/type functions](https://www.postgresql.org/docs/current/functions-info.html).
 
 ### 3.1.2 Two kinds of absence, and why neither is an empty array
 
@@ -693,9 +710,10 @@ Three queries, one set of shared `MATERIALIZED` CTEs:
 | `getSchemaRelations()` | `SCHEMA_RELATIONS_SQL` | FKs + indexes keyed by table | `/api/db/schema/relations` |
 
 Common behaviour:
-- System schemas (`pg_catalog`, `information_schema`, `pg_toast`) are excluded; only `BASE TABLE`s.
-- Row counts come from `pg_class.reltuples` (planner estimate, fast) and are clamped to ≥ 0
-  (`reltuples` is `-1` on never-analyzed tables).
+- System and extension-owned schemas are excluded. Tables, ordinary views and materialized views
+  are discovered as described in [§3.1.1](#311-what-counts-as-a-table).
+- Row counts use non-negative `pg_class.reltuples` estimates; negative or unavailable estimates,
+  ordinary views and unpopulated materialized views have no row-count badge.
 - Column lists are capped at the first 100 columns (`ordinal_position <= 100`).
 - Sizes use `pg_total_relation_size` formatted by `formatBytes()`.
 - Display names follow the public/qualified rule from [§3.4](#34-cross-schema-display-names--fk-references).

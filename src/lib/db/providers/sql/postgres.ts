@@ -185,8 +185,8 @@ const EXTENSION_OWNED_SCHEMAS_SQL =
 // What counts as a table, single-sourced because two readers ask: the object browser
 // and the overview's count. They answered from different catalogs and disagreed twice
 // - 98 against 2 on CockroachDB, then 4 against 3 on Materialize once materialized
-// views joined the browser - so both now read information_schema.tables through this.
-const USER_TABLE_TYPES = "'BASE TABLE', 'MATERIALIZED VIEW'";
+// views joined the browser - so both use the same relation types and materialized-view filter.
+const USER_TABLE_TYPES = "'BASE TABLE', 'MATERIALIZED VIEW', 'VIEW'";
 
 // The full "this schema is not the engine's own" test for one column: a fixed list of
 // engine-builtin schemas, plus anything an extension created.
@@ -194,27 +194,43 @@ function schemaExclusion(column: string): string {
   return `${column} NOT IN (${SYSTEM_SCHEMA_LIST}) AND ${column} NOT IN (${EXTENSION_OWNED_SCHEMAS_SQL})`;
 }
 
+// PostgreSQL omits materialized views from information_schema. Match its role-based
+// visibility, and avoid duplicating relatives that already expose them there.
+const POSTGRES_MATERIALIZED_FILTER = `
+          c.relkind = 'm'
+          AND ${schemaExclusion("n.nspname")}
+          AND NOT EXISTS (
+            SELECT 1 FROM information_schema.tables t
+            WHERE t.table_schema = n.nspname AND t.table_name = c.relname
+              AND t.table_type IN (${USER_TABLE_TYPES})
+          )
+          AND (pg_has_role(c.relowner, 'USAGE')
+            OR has_table_privilege(c.oid, 'SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER')
+            OR has_any_column_privilege(c.oid, 'SELECT, INSERT, UPDATE, REFERENCES'))`;
+
 // Reusable CTE fragments (no trailing comma). Composed into the queries below;
 // kept single-sourced so the shared CTEs aren't duplicated across queries.
-// The table_type filter is a positive list, not "anything that is not a view".
-// `MATERIALIZED VIEW` is on it for Materialize, which reports its materialized views
-// through information_schema.tables under that type and whose users work with them
-// rather than with base tables - listing only BASE TABLE hid the product itself.
-// Measured no-op everywhere else: PostgreSQL leaves materialized views out of
-// information_schema.tables altogether (its table_type is only BASE TABLE, VIEW,
-// FOREIGN or LOCAL TEMPORARY), and TimescaleDB, YugabyteDB, Cloudberry, AlloyDB Omni
-// and CockroachDB were each checked on a live instance and emit no such row.
+// Keep the information_schema path for ordinary views and wire-compatible engines;
+// the marked catalog unions can be removed if a relative lacks PostgreSQL's metadata.
 const CTE_TABLES_INFO = `
         tables_info AS MATERIALIZED (
           SELECT
             t.table_schema,
             t.table_name,
-            c.reltuples::bigint as row_count,
+            CASE WHEN t.table_type = 'VIEW' THEN NULL ELSE c.reltuples::bigint END as row_count,
             COALESCE(pg_total_relation_size(c.oid), 0) as total_size
           FROM information_schema.tables t
           LEFT JOIN pg_class c ON c.oid = to_regclass(quote_ident(t.table_schema) || '.' || quote_ident(t.table_name))
           WHERE ${schemaExclusion("t.table_schema")}
           AND t.table_type IN (${USER_TABLE_TYPES})
+          /* postgres-materialized:start */
+          UNION ALL
+          SELECT n.nspname, c.relname,
+            CASE WHEN c.relispopulated THEN c.reltuples::bigint ELSE NULL END,
+            COALESCE(pg_total_relation_size(c.oid), 0)
+          FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+          WHERE ${POSTGRES_MATERIALIZED_FILTER}
+          /* postgres-materialized:end */
         )`;
 
 const CTE_COLUMNS_INFO = `
@@ -230,8 +246,23 @@ const CTE_COLUMNS_INFO = `
                 'defaultValue', c.column_default
               ) ORDER BY c.ordinal_position
             ) FILTER (WHERE c.ordinal_position <= 100) as columns
-          FROM information_schema.columns c
-          WHERE ${schemaExclusion("c.table_schema")}
+          FROM (
+            SELECT c.table_schema, c.table_name, c.column_name, c.data_type,
+              c.is_nullable, c.column_default, c.ordinal_position
+            FROM information_schema.columns c
+            WHERE ${schemaExclusion("c.table_schema")}
+            /* postgres-materialized:start */
+            UNION ALL
+            SELECT n.nspname, c.relname, a.attname, format_type(a.atttypid, a.atttypmod),
+              CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END, NULL::text, a.attnum
+            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            JOIN pg_attribute a ON a.attrelid = c.oid
+            WHERE ${POSTGRES_MATERIALIZED_FILTER}
+              AND a.attnum > 0 AND NOT a.attisdropped
+              AND (pg_has_role(c.relowner, 'USAGE')
+                OR has_column_privilege(c.oid, a.attnum, 'SELECT, INSERT, UPDATE, REFERENCES'))
+            /* postgres-materialized:end */
+          ) c
           GROUP BY c.table_schema, c.table_name
         )`;
 
@@ -488,6 +519,21 @@ function isMissingExtensionCatalogError(error: unknown): boolean {
   return message.includes("pg_depend") || message.includes("pg_extension");
 }
 
+function isMissingMaterializedCatalogError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return (
+    /does not exist|unknown|not supported|unsupported|unrecognized/i.test(error.message) &&
+    /pg_attribute|relispopulated|relowner|attnotnull|attisdropped|format_type|pg_has_role|has_table_privilege|has_any_column_privilege|has_column_privilege/i.test(
+      error.message,
+    )
+  );
+}
+
+function withoutPostgresMaterializedViews(sql: string): string {
+  // Markers survive the other fallbacks' SQL rewrites, unlike exact-string replacement.
+  return sql.replace(/\/\* postgres-materialized:start \*\/[\s\S]*?\/\* postgres-materialized:end \*\//g, "");
+}
+
 // ============================================================================
 // Monitoring & maintenance SQL
 // ----------------------------------------------------------------------------
@@ -581,8 +627,15 @@ const OVERVIEW_SIZE_SQL = `
 // getOverview: user table and index counts across all user schemas.
 const OVERVIEW_COUNTS_SQL = `
         SELECT
-          (SELECT count(*) FROM information_schema.tables
-            WHERE ${schemaExclusion("table_schema")} AND table_type IN (${USER_TABLE_TYPES})) as table_count,
+          (SELECT count(*) FROM (
+            SELECT table_schema, table_name FROM information_schema.tables
+            WHERE ${schemaExclusion("table_schema")} AND table_type IN (${USER_TABLE_TYPES})
+            /* postgres-materialized:start */
+            UNION ALL
+            SELECT n.nspname, c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE ${POSTGRES_MATERIALIZED_FILTER}
+            /* postgres-materialized:end */
+          ) user_relations) as table_count,
           (SELECT count(*) FROM pg_indexes WHERE ${schemaExclusion("schemaname")}) as index_count
       `;
 
@@ -1447,6 +1500,7 @@ export class PostgresProvider extends SQLBaseProvider {
       { matches: isMissingConstraintColumnUsageError, apply: withoutForeignKeyCatalog },
       { matches: isMissingExtensionCatalogError, apply: withoutExtensionOwnershipTest },
       { matches: isMissingToRegclassError, apply: withoutToRegclass },
+      { matches: isMissingMaterializedCatalogError, apply: withoutPostgresMaterializedViews },
     ];
     let currentSql = sql;
     for (;;) {

@@ -1119,6 +1119,88 @@ describe("PostgresProvider", () => {
     });
   });
 
+  describe("view discovery", () => {
+    for (const method of ["getSchema", "getSchemaList"] as const) {
+      test(`${method} includes ordinary views and privilege-filtered PostgreSQL materialized views`, async () => {
+        let schemaSql = "";
+        mockQueryFn = (sql) => {
+          if (!sql.includes("tables_info AS")) return defaultMockQuery(sql);
+          schemaSql = sql;
+          return Promise.resolve({
+            rows: [
+              {
+                table_schema: "public",
+                table_name: "active_users",
+                row_count: null,
+                total_size: "0",
+                columns: [{ name: "name", type: "text", nullable: true }],
+                pk_columns: [],
+              },
+              {
+                table_schema: "analytics",
+                table_name: "daily_totals",
+                row_count: "25",
+                total_size: "8192",
+                columns: [{ name: "amount", type: "numeric(12,2)", nullable: true }],
+                pk_columns: [],
+              },
+              {
+                table_schema: "public",
+                table_name: "pending_totals",
+                row_count: null,
+                total_size: "0",
+                columns: [{ name: "id", type: "integer", nullable: true }],
+                pk_columns: [],
+              },
+            ],
+          });
+        };
+        provider = new PostgresProvider(makePgConfig());
+        await provider.connect();
+        const schema = await provider[method]();
+        expect(schema.map((table) => table.name)).toEqual(["active_users", "analytics.daily_totals", "pending_totals"]);
+        expect(schema[0].rowCount).toBeUndefined();
+        expect(schema[1].columns[0]).toMatchObject({ type: "numeric(12,2)", isPrimary: false });
+        expect(schema[2].rowCount).toBeUndefined();
+        expect(schemaSql).toContain("'VIEW'");
+        expect(schemaSql).toContain("c.relkind = 'm'");
+        expect(schemaSql).toContain("has_any_column_privilege(c.oid");
+        expect(schemaSql).toContain("has_column_privilege(c.oid, a.attnum");
+        expect(schemaSql).toContain("NOT a.attisdropped");
+        expect(schemaSql).toContain("format_type(a.atttypid, a.atttypmod)");
+        expect(schemaSql).toContain("c.relispopulated");
+      });
+    }
+
+    test("retains information_schema discovery when a wire-compatible engine lacks the materialized-view catalog", async () => {
+      const schemaQueries: string[] = [];
+      mockQueryFn = (sql) => {
+        if (sql.includes("tables_info AS")) {
+          schemaQueries.push(sql);
+          if (sql.includes("format_type(a.atttypid"))
+            return Promise.reject(new Error("function format_type does not exist"));
+        }
+        return defaultMockQuery(sql);
+      };
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      expect(await provider.getSchemaList()).toHaveLength(2);
+      expect(schemaQueries).toHaveLength(2);
+      expect(schemaQueries[1]).toContain("'VIEW'");
+      expect(schemaQueries[1]).not.toContain("c.relkind = 'm'");
+    });
+
+    test("does not hide permission errors in materialized-view discovery", async () => {
+      mockQueryFn = (sql) =>
+        sql.includes("tables_info AS")
+          ? Promise.reject(new Error("permission denied for relation pg_attribute"))
+          : defaultMockQuery(sql);
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      await expect(provider.getSchemaList()).rejects.toThrow("permission denied");
+    });
+  });
+
   // --------------------------------------------------------------------------
   // getSchemaRelations() — heavy FK/index path, keyed by table display name
   // --------------------------------------------------------------------------
