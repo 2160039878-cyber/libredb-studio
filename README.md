@@ -648,11 +648,11 @@ For a reverse-proxy path such as `/tools/libredb`, build with `BASE_PATH` and fo
 
 ### Koyeb
 
-1. **Fork this repository**
-2. **Connect to Koyeb**: [app.koyeb.com](https://app.koyeb.com) → New → Blueprint
-3. **Select your forked repo** and Koyeb will auto-detect `koyeb.yaml`
-4. **Set Environment Variables** in Koyeb Dashboard:
-5. **Deploy!**
+1. Use the **Deploy to Koyeb** button under [One-Click Deploy](#one-click-deploy) to run the prebuilt `ghcr.io/libredb/libredb-studio:latest` image.
+2. Set a strong `JWT_SECRET` (32+ characters) and real `ADMIN_PASSWORD` / `USER_PASSWORD` in the deploy form before launching. Koyeb cannot auto-generate secrets; the prefilled values are placeholders.
+3. For connections to survive redeploys, set `STORAGE_PROVIDER=postgres` and `STORAGE_POSTGRES_URL` to a Koyeb managed Postgres or Neon connection string. The button defaults to `STORAGE_PROVIDER=local`, which keeps connection metadata in the browser.
+
+See [`deploy/koyeb/`](deploy/koyeb/) for the complete setup and storage options.
 
 ### Railway
 
