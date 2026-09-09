@@ -37,7 +37,7 @@ export interface ParsedData {
 
 type ImportStep = "upload" | "preview" | "configure" | "ready";
 
-export function parseCSV(text: string): ParsedData {
+export function parseCSV(text: string, firstRowIsHeader = true): ParsedData {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
   if (lines.length === 0) return { headers: [], rows: [], totalRows: 0 };
 
@@ -69,8 +69,9 @@ export function parseCSV(text: string): ParsedData {
     return result;
   };
 
-  const headers = parseLine(lines[0]);
-  const rows = lines.slice(1).map((line) => parseLine(line));
+  const firstRow = parseLine(lines[0]);
+  const headers = firstRowIsHeader ? firstRow : firstRow.map((_, index) => `column_${index + 1}`);
+  const rows = lines.slice(firstRowIsHeader ? 1 : 0).map((line) => parseLine(line));
   return { headers, rows, totalRows: rows.length };
 }
 
@@ -201,6 +202,7 @@ export function DataImportModal({ isOpen, onClose, onImport, tables, databaseTyp
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
   const [fileName, setFileName] = useState("");
   const [fileType, setFileType] = useState<"csv" | "json">("csv");
+  const [firstRowIsHeader, setFirstRowIsHeader] = useState(true);
   const [targetTable, setTargetTable] = useState("");
   const [createNewTable, setCreateNewTable] = useState(false);
   const [newTableName, setNewTableName] = useState("");
@@ -208,11 +210,14 @@ export function DataImportModal({ isOpen, onClose, onImport, tables, databaseTyp
   const [error, setError] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const csvTextRef = useRef("");
 
   const resetState = useCallback(() => {
     setStep("upload");
     setParsedData(null);
     setFileName("");
+    setFirstRowIsHeader(true);
+    csvTextRef.current = "";
     setTargetTable("");
     setCreateNewTable(false);
     setNewTableName("");
@@ -245,6 +250,7 @@ export function DataImportModal({ isOpen, onClose, onImport, tables, databaseTyp
           return;
         }
 
+        csvTextRef.current = isJSON ? "" : text;
         setParsedData(data);
         // Auto-map columns 1:1
         const mapping: Record<string, string> = {};
@@ -417,6 +423,24 @@ export function DataImportModal({ isOpen, onClose, onImport, tables, databaseTyp
                   <X strokeWidth={1.5} className="w-3 h-3 mr-1" /> Reset
                 </Button>
               </div>
+
+              {fileType === "csv" && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={firstRowIsHeader}
+                    onChange={(e) => {
+                      const hasHeader = e.target.checked;
+                      const data = parseCSV(csvTextRef.current, hasHeader);
+                      setFirstRowIsHeader(hasHeader);
+                      setParsedData(data);
+                      setColumnMapping(Object.fromEntries(data.headers.map((header) => [header, header])));
+                    }}
+                    className="rounded border-edge bg-panel"
+                  />
+                  <span className="text-xs text-fg-secondary">First row is header</span>
+                </label>
+              )}
 
               {/* Preview Table */}
               <div className="border border-hairline rounded-lg overflow-auto max-h-60">

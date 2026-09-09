@@ -31,6 +31,29 @@ describe("parseCSV", () => {
     expect(result.totalRows).toBe(0);
   });
 
+  test("preserves every row and generates column names for headerless CSV", () => {
+    expect(parseCSV("Alice,30\r\n\r\nBob,25\r\n", false)).toEqual({
+      headers: ["column_1", "column_2"],
+      rows: [
+        ["Alice", "30"],
+        ["Bob", "25"],
+      ],
+      totalRows: 2,
+    });
+  });
+
+  test("preserves a single headerless row with quoted and empty fields", () => {
+    expect(parseCSV('"Alice, Smith","She said ""hi""",,Alice', false)).toEqual({
+      headers: ["column_1", "column_2", "column_3", "column_4"],
+      rows: [["Alice, Smith", 'She said "hi"', "", "Alice"]],
+      totalRows: 1,
+    });
+  });
+
+  test("returns empty data for a blank headerless CSV", () => {
+    expect(parseCSV(" \r\n\r\n", false)).toEqual({ headers: [], rows: [], totalRows: 0 });
+  });
+
   test("returns empty for whitespace-only input", () => {
     const result = parseCSV("  \n  \n  ");
     expect(result.headers).toEqual([]);

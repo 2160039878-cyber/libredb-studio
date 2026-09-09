@@ -142,6 +142,72 @@ describe("DataImportModal", () => {
     expect(body.queryByText("loves, commas")).not.toBeNull();
   });
 
+  test("headerless CSV preserves the first row through preview, mapping, and SQL import", () => {
+    const onImport = mock((sql: string) => sql);
+    const { baseElement } = render(<DataImportModal isOpen onClose={noop} onImport={onImport} tables={sampleTables} />);
+    act(() => simulateFileUpload(baseElement, "Alice,30\nBob,25", "headerless.csv"));
+
+    const body = within(baseElement);
+    const checkbox = body.getByRole("checkbox", { name: "First row is header" }) as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    expect(body.getByText("1 rows, 2 columns")).not.toBeNull();
+    act(() => fireEvent.click(checkbox));
+
+    expect(checkbox.checked).toBe(false);
+    expect(body.getByRole("columnheader", { name: "column_1" })).not.toBeNull();
+    expect(body.getByRole("columnheader", { name: "column_2" })).not.toBeNull();
+    expect(body.getByRole("cell", { name: "Alice" })).not.toBeNull();
+    expect(body.getByRole("cell", { name: "Bob" })).not.toBeNull();
+    expect(body.getByText("2 rows, 2 columns")).not.toBeNull();
+
+    act(() => fireEvent.click(body.getByText("Configure Import")));
+    expect((body.getByLabelText("Target column for column_1") as HTMLInputElement).value).toBe("column_1");
+    act(() => {
+      fireEvent.click(body.getByText("New Table"));
+      fireEvent.change(body.getByLabelText("Target column for column_1"), { target: { value: "name" } });
+    });
+    act(() => fireEvent.click(body.getByText("Review SQL")));
+    act(() => fireEvent.click(body.getByText("Execute Import")));
+
+    expect(onImport).toHaveBeenCalledTimes(1);
+    const sql = onImport.mock.calls[0][0];
+    expect(sql).toContain("CREATE TABLE imported_data");
+    expect(sql).toContain("INSERT INTO imported_data (name, column_2)");
+    expect(sql).toContain("('Alice', 30)");
+    expect(sql).toContain("('Bob', 25)");
+  });
+
+  test("the header option can be toggled repeatedly for a single-row CSV", () => {
+    const { baseElement } = render(<DataImportModal isOpen onClose={noop} onImport={noop} tables={[]} />);
+    act(() => simulateFileUpload(baseElement, "Alice,30", "single.csv"));
+    const body = within(baseElement);
+    const checkbox = body.getByRole("checkbox", { name: "First row is header" });
+
+    act(() => fireEvent.click(checkbox));
+    expect(body.getByText("1 rows, 2 columns")).not.toBeNull();
+    expect(body.getByRole("cell", { name: "Alice" })).not.toBeNull();
+    act(() => fireEvent.click(checkbox));
+    expect(body.getByText("0 rows, 2 columns")).not.toBeNull();
+    expect(body.getByRole("columnheader", { name: "Alice" })).not.toBeNull();
+    act(() => fireEvent.click(checkbox));
+    expect(body.getByText("1 rows, 2 columns")).not.toBeNull();
+    expect(body.getAllByRole("cell")).toHaveLength(2);
+  });
+
+  test("Reset restores header handling for the next CSV upload", () => {
+    const { baseElement } = render(<DataImportModal isOpen onClose={noop} onImport={noop} tables={[]} />);
+    act(() => simulateFileUpload(baseElement, "Alice,30", "first.csv"));
+    const body = within(baseElement);
+    act(() => fireEvent.click(body.getByRole("checkbox", { name: "First row is header" })));
+    act(() => fireEvent.click(body.getByText("Reset")));
+    act(() => simulateFileUpload(baseElement, "name,age\nBob,25", "second.csv"));
+
+    expect((body.getByRole("checkbox", { name: "First row is header" }) as HTMLInputElement).checked).toBe(true);
+    expect(body.getByRole("columnheader", { name: "name" })).not.toBeNull();
+    expect(body.getByRole("cell", { name: "Bob" })).not.toBeNull();
+    expect(body.getByText("1 rows, 2 columns")).not.toBeNull();
+  });
+
   test("shows preview table headers from CSV", () => {
     const { baseElement } = render(<DataImportModal isOpen onClose={noop} onImport={noop} tables={sampleTables} />);
 
@@ -223,6 +289,7 @@ describe("DataImportModal", () => {
     // File name appears in header + preview body
     expect(body.queryAllByText("data.json").length).toBeGreaterThanOrEqual(1);
     expect(body.queryByText(/1 row/)).not.toBeNull();
+    expect(body.queryByRole("checkbox", { name: "First row is header" })).toBeNull();
   });
 
   // ── Error handling ─────────────────────────────────────────────────────────
