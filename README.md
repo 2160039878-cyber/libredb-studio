@@ -624,10 +624,12 @@ Deploy your own instance of LibreDB Studio with a single click on DigitalOcean, 
 | `OIDC_ADMIN_ROLES` | ❌ | Comma-separated admin role values (default: `admin`) |
 | `OIDC_ROLE_CLAIM` | ❌ | Claim path for role (e.g. `realm_access.roles`) |
 | `OIDC_SCOPE` | ❌ | OIDC scope (default: `openid profile email`) |
-| `LLM_PROVIDER` | ❌ | AI provider: `gemini`, `openai`, `ollama` |
+| `LLM_PROVIDER` | ❌ | AI: `gemini`, `openai`, `ollama`, `custom` (self-hosted OpenAI-compatible endpoint) |
 | `LLM_API_KEY` | ❌ | API key for AI features |
 | `LLM_MODEL` | ❌ | Model name (e.g., `gemini-2.5-flash`) |
+| `LLM_API_URL` | ❌ | API URL for `ollama` and `custom`; required for `custom`, defaults to `http://localhost:11434/v1` for `ollama` |
 | `STORAGE_PROVIDER` | ❌ | Storage provider: `local` (default), `sqlite`, or `postgres` |
+| `STORAGE_SQLITE_PATH` | ❌ | SQLite file path (e.g. `/app/data/libredb-storage.db`) |
 | `STORAGE_POSTGRES_URL` | ❌ | PostgreSQL connection URL (required when `STORAGE_PROVIDER=postgres`) |
 | `SEED_CONFIG_PATH` | ❌ | Path to seed connections YAML config (see [Seed Connections](#seed-connections-pre-configured-databases)) |
 | `SEED_CACHE_TTL_MS` | ❌ | Seed config cache TTL in ms (default: `60000`) |
