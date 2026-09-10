@@ -249,7 +249,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 - **Threshold Alerting**: Color-coded health indicators (healthy/warning/critical) for cache hit ratio, connection usage, deadlocks, and buffer pool utilization.
 - **Connection Pool Stats**: Live total/active/idle/waiting pool metrics with utilization progress bars.
 - **One-Click Maintenance**: Trigger `VACUUM`, `ANALYZE`, `REINDEX`, `UPDATE STATISTICS`, `DBCC CHECKDB`, and `ALTER INDEX REBUILD` per database engine.
-- **Audit Trail**: Full history of every query executed across the organization.
+- **Audit Trail**: Full history of every query executed across the organization. The admin Audit tab exports loaded operations and query history as CSV or JSON, respecting the current filters.
 
 ---
 
