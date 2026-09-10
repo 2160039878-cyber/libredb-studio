@@ -260,7 +260,9 @@ export function OperationsTab() {
   const sessionsUnavailable = data?.activeSessions === undefined ? data?.errors?.activeSessions : undefined;
   const tablesUnavailable = data?.tables === undefined ? data?.errors?.tables : undefined;
   const [tableSearch, setTableSearch] = useState(deepLinkedTable ?? "");
-  const filteredTables = tables.filter((t) => t.tableName.toLowerCase().includes(tableSearch.toLowerCase()));
+  const filteredTables = tables.filter((t) =>
+    `${t.schemaName}.${t.tableName}`.toLowerCase().includes(tableSearch.toLowerCase()),
+  );
 
   // U22. Both halves have to be true for the dead end: the engine declares a control
   // that takes ONE table, and this page has no row to offer it on. Which absence it is
@@ -516,16 +518,20 @@ export function OperationsTab() {
                   {filteredTables.map((table) => (
                     <div
                       key={`${table.schemaName}.${table.tableName}`}
-                      data-selected={table.tableName === deepLinkedTable ? "true" : undefined}
-                      className={`group flex items-center justify-between px-4 py-2 hover:bg-fill transition-colors ${
-                        table.tableName === deepLinkedTable ? "bg-fill" : ""
-                      }`}
+                      data-selected={
+                        table.tableName === deepLinkedTable ||
+                        `${table.schemaName}.${table.tableName}` === deepLinkedTable
+                          ? "true"
+                          : undefined
+                      }
+                      className="group flex items-center justify-between px-4 py-2 hover:bg-fill data-[selected=true]:bg-fill transition-colors"
                     >
                       <div className="min-w-0">
                         <div className="text-sm font-medium text-fg-secondary truncate max-w-[160px]">
                           {table.tableName}
                         </div>
                         <div className="flex items-center gap-2 text-xs text-fg-muted">
+                          <span>{table.schemaName}</span>
                           <span className="font-mono">{table.rowCount.toLocaleString()} rows</span>
                           <span>-</span>
                           <span className="font-mono">{table.tableSize}</span>
@@ -547,10 +553,10 @@ export function OperationsTab() {
                             variant="ghost"
                             className={`w-7 h-7 text-fg-muted ${hover}`}
                             title={label}
-                            onClick={() => handleRunMaintenance(type, table.tableName)}
+                            onClick={() => handleRunMaintenance(type, table.maintenanceTarget ?? table.tableName)}
                             disabled={!!actionLoading}
                           >
-                            {actionLoading === `${type}-${table.tableName}` ? (
+                            {actionLoading === `${type}-${table.maintenanceTarget ?? table.tableName}` ? (
                               <LoaderCircle className="w-3 h-3 animate-spin" />
                             ) : (
                               <Icon className="w-3 h-3" />

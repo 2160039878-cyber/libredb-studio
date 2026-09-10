@@ -388,11 +388,11 @@ export function TablesTab({ data, loading, onRunMaintenance, isAdmin = true, cap
                                 variant="ghost"
                                 size="icon"
                                 className={className}
-                                onClick={() => handleMaintenance(type, table.tableName)}
+                                onClick={() => handleMaintenance(type, table.maintenanceTarget ?? table.tableName)}
                                 disabled={!!actionLoading}
                                 title={label}
                               >
-                                {actionLoading === `${type}-${table.tableName}` ? (
+                                {actionLoading === `${type}-${table.maintenanceTarget ?? table.tableName}` ? (
                                   <LoaderCircle strokeWidth={1.5} className="h-3 w-3 animate-spin" />
                                 ) : (
                                   <Icon strokeWidth={1.5} className="h-3 w-3" />

@@ -268,6 +268,37 @@ describe("TablesTab", () => {
     expect(container.querySelector('button[title="Reindex"]')).toBeNull();
     expect(queryAllByText("-").length).toBeGreaterThan(0);
   });
+
+  test("maintenance preserves provider targets and distinguishes same-named tables across schemas", async () => {
+    const data = makeData();
+    data.tables = ["public", "reporting"].map((schemaName) => ({
+      ...data.tables![0],
+      schemaName,
+      tableName: "Users",
+      maintenanceTarget: `"${schemaName}"."Users"`,
+    }));
+    let finish!: (success: boolean) => void;
+    const onRunMaintenance = mock(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { container } = render(
+      <TablesTab data={data} loading={false} onRunMaintenance={onRunMaintenance} capabilities={makeCapabilities()} />,
+    );
+    const rows = container.querySelectorAll("tbody tr");
+    for (const operation of ["Analyze", "Vacuum", "Reindex"]) {
+      fireEvent.click(rows[1].querySelector(`button[title="${operation}"]`)!);
+      expect(onRunMaintenance).toHaveBeenLastCalledWith(operation.toLowerCase(), '"reporting"."Users"');
+      expect(rows[1].querySelectorAll(".animate-spin").length).toBe(1);
+      expect(rows[0].querySelectorAll(".animate-spin").length).toBe(0);
+      finish(true);
+      await waitFor(() =>
+        expect(rows[1].querySelector(`button[title="${operation}"]`)!.hasAttribute("disabled")).toBe(false),
+      );
+    }
+  });
   // #448 settled the rule this panel broke one component over: absence and zero are
   // different inputs. Measured 2026-08-21 in Chrome against Apache Cassandra 5.0.9 —
   // Monitoring -> Tables read "Tables 0 / 0 rows", "Size 0 B" and a green "Vacuum 0 / OK"

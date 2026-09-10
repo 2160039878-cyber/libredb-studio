@@ -845,6 +845,8 @@ export interface ActiveSessionDetails {
 export interface TableStats {
   schemaName: string;
   tableName: string;
+  /** Provider-owned maintenance identifier; callers fall back to tableName when absent. */
+  maintenanceTarget?: string;
   rowCount: number;
   liveRowCount?: number;
   deadRowCount?: number;

@@ -1684,6 +1684,9 @@ export class PostgresProvider extends SQLBaseProvider {
    */
   private qualifyMaintenanceTarget(target?: string): string {
     if (!target) return "";
+    // getTableStats quotes the two catalog names separately, including literal dots.
+    // Accept only that complete identifier shape before retaining the legacy raw form.
+    if (/^"(?:[^"]|"")+"\."(?:[^"]|"")+"$/.test(target)) return target;
     if (target.includes(".")) {
       return target
         .split(".")
@@ -2038,6 +2041,7 @@ export class PostgresProvider extends SQLBaseProvider {
       return res.rows.map((r) => ({
         schemaName: r.schema_name,
         tableName: r.table_name,
+        maintenanceTarget: `${this.escapeIdentifier(r.schema_name)}.${this.escapeIdentifier(r.table_name)}`,
         rowCount: parseInt(r.row_count || "0"),
         liveRowCount: parseInt(r.live_row_count || "0"),
         deadRowCount: parseInt(r.dead_row_count || "0"),

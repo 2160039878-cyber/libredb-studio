@@ -2668,6 +2668,36 @@ describe("PostgresProvider", () => {
   // --------------------------------------------------------------------------
 
   describe("getTableStats()", () => {
+    test.each([
+      ["public", "Users"],
+      ["reporting", "Users"],
+      ["Sales.Operations", 'Monthly."Summary;--'],
+    ])("round-trips the maintenance target for %s.%s", async (schemaName, tableName) => {
+      provider = new PostgresProvider(makePgConfig());
+      await provider.connect();
+      const statements: string[] = [];
+      mockQueryFn = async (sql: string) => {
+        statements.push(sql);
+        if (sql.includes("schemaname as schema_name") && sql.includes("pg_stat_user_tables")) {
+          return { rows: [{ schema_name: schemaName, table_name: tableName }], fields: [], rowCount: 1 };
+        }
+        return defaultMockQuery(sql);
+      };
+      const [table] = await provider.getTableStats();
+      const expected = `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`;
+      expect(table.tableName).toBe(tableName);
+      expect(table.schemaName).toBe(schemaName);
+      expect(table.maintenanceTarget).toBe(expected);
+      for (const [operation, command] of [
+        ["analyze", "ANALYZE"],
+        ["vacuum", "VACUUM ANALYZE"],
+        ["reindex", "REINDEX TABLE"],
+      ] as const) {
+        await provider.runMaintenance(operation, table.maintenanceTarget);
+        expect(statements.at(-1)).toBe(`${command} ${expected}`);
+      }
+    });
+
     test("returns table stats for all schemas", async () => {
       provider = new PostgresProvider(makePgConfig());
       await provider.connect();

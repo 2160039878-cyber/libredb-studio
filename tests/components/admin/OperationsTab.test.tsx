@@ -835,6 +835,39 @@ describe("OperationsTab", () => {
     expect(mockRunMaintenance).toHaveBeenCalledWith("vacuum", "users");
   });
 
+  test("schema-qualified deep links select the right table and preserve its maintenance target", async () => {
+    setMockSearchParams(new URLSearchParams({ table: "reporting.Users" }));
+    monitoringOverride = {
+      data: {
+        tables: ["public", "reporting"].map((schemaName) => ({
+          ...defaultTables[0],
+          schemaName,
+          tableName: "Users",
+          maintenanceTarget: `"${schemaName}"."Users"`,
+        })),
+      },
+    };
+    let rendered!: ReturnType<typeof render>;
+    await act(async () => {
+      rendered = render(<OperationsTab />);
+    });
+    const { container, getByPlaceholderText, getByText } = rendered;
+    const selected = container.querySelector('[data-selected="true"]');
+    expect(selected).not.toBeNull();
+    expect(getByText("reporting")).not.toBeNull();
+    const tableList = selected!.parentElement!;
+    expect(tableList.children.length).toBe(1);
+    for (const operation of ["Analyze", "Vacuum", "Reindex"]) {
+      await act(async () => {
+        fireEvent.click(selected!.querySelector(`button[title="${operation}"]`)!);
+      });
+      expect(mockRunMaintenance).toHaveBeenLastCalledWith(operation.toLowerCase(), '"reporting"."Users"');
+    }
+    fireEvent.change(getByPlaceholderText("Filter..."), { target: { value: "Users" } });
+    expect(tableList.children.length).toBe(2);
+    expect(container.querySelectorAll('[data-selected="true"]').length).toBe(1);
+  });
+
   // =========================================================================
   // Kill session flow
   // =========================================================================

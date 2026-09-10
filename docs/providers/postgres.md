@@ -386,7 +386,9 @@ Monitoring never hard-fails on a missing optional feature:
 
 `qualifyMaintenanceTarget()` ([`postgres.ts`](../../src/lib/db/providers/sql/postgres.ts)) quotes
 maintenance targets through `escapeIdentifier()`: a bare name defaults to the `public` schema; a
-`schema.table` target is quoted per-part. This prevents identifier injection in `VACUUM`/`ANALYZE`/
+`schema.table` target is quoted per-part. A fully quoted `"schema"."table"` is also accepted,
+only when the entire target consists of those two quoted identifiers. This preserves literal
+dots and doubled quotes in catalog names. This prevents identifier injection in `VACUUM`/`ANALYZE`/
 `REINDEX` statements (which cannot use bind parameters for object names).
 
 ---
@@ -720,7 +722,11 @@ base) fans these out in parallel.
 | `getPgStatActivity()` | `pg_stat_activity` | raw passthrough for advanced views |
 
 `getTableStats()` / `getIndexStats()` accept an optional `{ schema }` filter; with none they cover
-all user schemas.
+all user schemas. Table statistics retain the separate `schemaName` and `tableName` and also
+publish `maintenanceTarget`, with both identifiers quoted. Monitoring and admin table actions
+pass that target unchanged, including for `public`, so a same-named table in another schema
+cannot redirect the action. Providers that omit this optional field keep their existing bare
+table target. Admin searches and Explorer deep links also match `schema.table`.
 
 **Database size is absent, never zeroed, when it is not measured.** `getOverview()` sizes the
 database with `pg_database_size($1)` and reads the byte figure only, the shape `mssql.ts` uses:
