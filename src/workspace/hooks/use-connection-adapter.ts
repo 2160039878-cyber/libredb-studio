@@ -1,5 +1,6 @@
 "use client";
 
+import { useSchemaDetails } from "@/hooks/use-schema-details";
 import { useState, useCallback, useMemo } from "react";
 import type { DatabaseConnection, TableSchema } from "@/lib/types";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
@@ -8,9 +9,16 @@ import type { WorkspaceConnection } from "@/workspace/types";
 interface UseConnectionAdapterParams {
   connections: WorkspaceConnection[];
   onSchemaFetch: (connectionId: string) => Promise<TableSchema[]>;
+  onSchemaListFetch?: (connectionId: string) => Promise<TableSchema[]>;
+  onTableSchemaFetch?: (connectionId: string, tableName: string) => Promise<TableSchema | null>;
 }
 
-export function useConnectionAdapter({ connections: externalConnections, onSchemaFetch }: UseConnectionAdapterParams) {
+export function useConnectionAdapter({
+  connections: externalConnections,
+  onSchemaFetch,
+  onSchemaListFetch,
+  onTableSchemaFetch,
+}: UseConnectionAdapterParams) {
   const connections: DatabaseConnection[] = useMemo(
     () =>
       externalConnections.map((c) => ({
@@ -58,19 +66,39 @@ export function useConnectionAdapter({ connections: externalConnections, onSchem
     setActiveConnectionId(conn?.id ?? null);
   }, []);
 
+  const loadDetails = useCallback(
+    async (tableName?: string): Promise<TableSchema[]> => {
+      const id = activeConnection!.id;
+      if (tableName !== undefined && onTableSchemaFetch) {
+        const table = await onTableSchemaFetch(id, tableName);
+        return table ? [table] : [];
+      }
+      const full = await onSchemaFetch(id);
+      return tableName === undefined ? full : full.filter((table) => table.name === tableName);
+    },
+    [activeConnection, onSchemaFetch, onTableSchemaFetch],
+  );
+  const { ensureSchema, startSchemaLoad, isLoadingFullSchema } = useSchemaDetails(
+    activeConnection?.id,
+    schema,
+    setSchema,
+    loadDetails,
+  );
+
   const fetchSchema = useCallback(
     async (conn: DatabaseConnection) => {
+      const isCurrent = startSchemaLoad();
       setIsLoadingSchema(true);
       try {
-        const result = await onSchemaFetch(conn.id);
-        setSchema(result);
+        const result = await (onSchemaListFetch ?? onSchemaFetch)(conn.id);
+        if (isCurrent()) setSchema(result);
       } catch {
-        setSchema([]);
+        if (isCurrent()) setSchema([]);
       } finally {
-        setIsLoadingSchema(false);
+        if (isCurrent()) setIsLoadingSchema(false);
       }
     },
-    [onSchemaFetch],
+    [onSchemaFetch, onSchemaListFetch, startSchemaLoad],
   );
 
   const schemaContext = useMemo(() => JSON.stringify(schema), [schema]);
@@ -99,7 +127,8 @@ export function useConnectionAdapter({ connections: externalConnections, onSchem
     setActiveConnection,
     schema,
     setSchema,
-    isLoadingSchema,
+    isLoadingSchema: isLoadingSchema || isLoadingFullSchema,
+    ensureSchema,
     connectionPulse: null as "healthy" | "degraded" | "error" | null,
     fetchSchema,
     schemaContext,

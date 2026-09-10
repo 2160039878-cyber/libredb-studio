@@ -169,7 +169,12 @@ export interface StudioWorkspaceProps {
       unlimited?: boolean;
     },
   ) => Promise<WorkspaceQueryResult>;
+  /** Complete schema, also used for explicit ERD, documentation and schema-diff requests. */
   onSchemaFetch: (connectionId: string) => Promise<TableSchema[]>;
+  /** Optional fast inventory. Entries with detailsLoaded: false are expanded on demand. */
+  onSchemaListFetch?: (connectionId: string) => Promise<TableSchema[]>;
+  /** Optional single-table reader; falls back to onSchemaFetch when omitted. */
+  onTableSchemaFetch?: (connectionId: string, tableName: string) => Promise<TableSchema | null>;
 
   onTestConnection?: (config: {
     type: DatabaseType;

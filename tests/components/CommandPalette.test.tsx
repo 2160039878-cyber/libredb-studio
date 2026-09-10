@@ -13,8 +13,15 @@ mock.module("cmdk", () => {
   );
   Command.displayName = "Command";
 
-  const CommandInput = React.forwardRef((props: Record<string, unknown>, ref: React.Ref<HTMLElement>) =>
-    React.createElement("input", { ...props, ref, "data-testid": "command-input" }),
+  const CommandInput = React.forwardRef(
+    ({ onValueChange, ...props }: Record<string, unknown>, ref: React.Ref<HTMLElement>) =>
+      React.createElement("input", {
+        ...props,
+        ref,
+        onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+          (onValueChange as ((value: string) => void) | undefined)?.(e.target.value),
+        "data-testid": "command-input",
+      }),
   );
   CommandInput.displayName = "CommandInput";
   Command.Input = CommandInput;
@@ -120,6 +127,21 @@ function createDefaultProps(overrides: Partial<Parameters<typeof CommandPalette>
 }
 
 describe("CommandPalette", () => {
+  test("large catalogs keep table commands bounded and search all names", () => {
+    const schema = Array.from({ length: 43500 }, (_, i) => ({
+      ...mockSchema[0],
+      name: `PS_${String(i).padStart(5, "0")}`,
+      detailsLoaded: false,
+      columns: [],
+    }));
+    const view = render(<CommandPalette {...createDefaultProps({ schema })} />);
+    fireEvent.keyDown(document, { key: "k", ctrlKey: true });
+    expect(view.getAllByText("Details on demand", { exact: false })).toHaveLength(100);
+    fireEvent.change(view.getByTestId("command-input"), { target: { value: "PS_43499" } });
+    expect(view.getByText("PS_43499")).toBeDefined();
+    expect(view.queryByText("PS_00000")).toBeNull();
+  });
+
   afterEach(() => {
     cleanup();
   });

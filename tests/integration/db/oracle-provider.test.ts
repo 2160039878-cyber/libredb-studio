@@ -1208,6 +1208,85 @@ describe("OracleProvider", () => {
   // =========================================================================
 
   describe("getSchema()", () => {
+    test("lazy Oracle inventory reads only table names for a large owner", async () => {
+      await provider.connect();
+      const execute = mock(async (_sql: string, _params?: unknown[]) => ({
+        rows: Array.from({ length: 43500 }, (_, i) => ({ TABLE_NAME: `PS_${i}`, NUM_ROWS: 10 })),
+      }));
+      mockExecuteFn = execute;
+      const schema = await provider.getSchemaList();
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(execute.mock.calls[0][0]).not.toMatch(/ALL_TAB_COLUMNS|ALL_CONSTRAINTS|ALL_INDEXES/);
+      expect(schema).toHaveLength(43500);
+      expect(schema[0]).toMatchObject({ name: "PS_0", columns: [], indexes: [], detailsLoaded: false });
+    });
+
+    test("lazy Oracle details bind one table in every catalog query", async () => {
+      await provider.connect();
+      const execute = mock(async (sql: string, params?: unknown[]) => {
+        expect(params).toEqual(["TEST_USER", "USERS"]);
+        expect(sql).toMatch(/TABLE_NAME\s*=\s*:2/);
+        const result = await defaultExecute(sql);
+        return {
+          ...result,
+          rows: (result.rows as Record<string, unknown>[] | undefined)?.filter((row) => row.TABLE_NAME === "USERS"),
+        };
+      });
+      mockExecuteFn = execute;
+      const table = await provider.getTableSchema("USERS");
+      expect(execute).toHaveBeenCalledTimes(5);
+      expect(table?.name).toBe("USERS");
+      expect(table?.columns.find((c) => c.name === "ID")?.isPrimary).toBe(true);
+    });
+
+    test("lazy Oracle missing table stops before loading other catalog rows", async () => {
+      await provider.connect();
+      const execute = mock(async () => ({ rows: [] }));
+      mockExecuteFn = execute;
+      expect(await provider.getTableSchema("DROPPED")).toBeNull();
+      expect(execute).toHaveBeenCalledTimes(1);
+    });
+
+    test("lazy Oracle table names remain bind values even when they contain SQL syntax", async () => {
+      await provider.connect();
+      const name = "x' OR 1=1 --";
+      const execute = mock(async (sql: string, params?: unknown[]) => {
+        expect(sql).not.toContain(name);
+        expect(params).toEqual(["TEST_USER", name]);
+        return { rows: [{ TABLE_NAME: name }] };
+      });
+      mockExecuteFn = execute;
+      expect((await provider.getTableSchema(name))?.name).toBe(name);
+      expect(execute).toHaveBeenCalledTimes(5);
+    });
+
+    test("lazy Oracle inventory handles absent statistics and empty driver rows", async () => {
+      await provider.connect();
+      mockExecuteFn = async () => ({ rows: [{}] });
+      expect(await provider.getSchemaList()).toEqual([
+        { name: "", rowCount: 0, columns: [], indexes: [], foreignKeys: [], detailsLoaded: false },
+      ]);
+      mockExecuteFn = async () => ({});
+      expect(await provider.getSchemaList()).toEqual([]);
+    });
+
+    test.each(["list", "table"])("lazy Oracle %s releases the connection after a catalog error", async (kind) => {
+      await provider.connect();
+      const close = mock(async () => {});
+      mockConnCloseFn = close;
+      mockExecuteFn = async () => {
+        throw new Error("catalog unavailable");
+      };
+      await expect(kind === "list" ? provider.getSchemaList() : provider.getTableSchema("USERS")).rejects.toThrow(
+        "catalog unavailable",
+      );
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+
+    test("lazy Oracle inventory requires a live connection", async () => {
+      await expect(provider.getSchemaList()).rejects.toThrow();
+    });
+
     test("returns tables with columns, indexes, PKs, and FKs", async () => {
       await provider.connect();
       const schema = await provider.getSchema();

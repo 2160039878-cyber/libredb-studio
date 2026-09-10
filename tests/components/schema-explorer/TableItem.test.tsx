@@ -184,6 +184,46 @@ describe("TableItem", () => {
     else Object.defineProperty(globalThis.document, "execCommand", originalExecCommand);
   });
 
+  test("lazy table expansion loads once and displays details after the parent merges them", async () => {
+    const table = { ...largeTable, columns: [], indexes: [], detailsLoaded: false };
+    let resolve!: (value: TableSchema[] | null) => void;
+    const onLoadTable = mock(
+      () =>
+        new Promise<TableSchema[] | null>((done) => {
+          resolve = done;
+        }),
+    );
+    const props = { table, isExpanded: false, onToggle: mock(() => {}), onLoadTable, isAdmin: false };
+    const view = render(<TableItem {...props} />);
+    fireEvent.click(view.getByRole("button", { name: "users" }));
+    view.rerender(<TableItem {...props} isExpanded />);
+    expect(view.getByRole("status").textContent).toContain("Loading table details");
+    expect(view.queryByTestId("column-list")).toBeNull();
+    expect(onLoadTable).toHaveBeenCalledWith("users");
+    resolve([largeTable]);
+    await waitFor(() => expect(view.queryByRole("status")).toBeNull());
+    view.rerender(<TableItem {...props} table={largeTable} isExpanded />);
+    expect(view.getByTestId("column-list").textContent).toContain("2 cols");
+  });
+
+  test("lazy table failures remain retryable and never display an empty column list", async () => {
+    const onLoadTable = mock(async () => null);
+    const view = render(
+      <TableItem
+        table={{ ...largeTable, columns: [], detailsLoaded: false }}
+        isExpanded
+        onToggle={() => {}}
+        onLoadTable={onLoadTable}
+        isAdmin={false}
+      />,
+    );
+    fireEvent.click(view.getByRole("button", { name: "Load table details" }));
+    await waitFor(() => expect(view.queryByRole("status")).toBeNull());
+    expect(view.queryByTestId("column-list")).toBeNull();
+    fireEvent.click(view.getByRole("button", { name: "Load table details" }));
+    await waitFor(() => expect(onLoadTable).toHaveBeenCalledTimes(2));
+  });
+
   // ── Rendering ─────────────────────────────────────────────────────────────
 
   test("renders table name", () => {

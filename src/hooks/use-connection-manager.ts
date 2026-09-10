@@ -3,6 +3,7 @@
 import { appFetch } from "@/lib/config/base-path";
 import { useState, useEffect, useCallback, useMemo } from "react";
 import type { DatabaseConnection, TableSchema, TableRelations } from "@/lib/types";
+import { useSchemaDetails } from "@/hooks/use-schema-details";
 import { useToast } from "@/hooks/use-toast";
 import { storage } from "@/lib/storage";
 import { logger } from "@/lib/logger";
@@ -47,12 +48,38 @@ export function useConnectionManager(storageReady = false) {
 
   const { toast } = useToast();
 
-  // Fetch schema for a connection — two phases so a slow/failing stats query
-  // never blocks the table list:
-  //   1. /api/db/schema/list      → tables + columns + PKs (fast)  → render tree
-  //   2. /api/db/schema/relations → foreign keys + indexes (heavy) → async merge
+  const loadDetails = useCallback(
+    async (tableName?: string): Promise<TableSchema[]> => {
+      const conn = activeConnection!;
+      const payload = conn.managed && conn.seedId ? { connectionId: `seed:${conn.seedId}` } : conn;
+      const response = await appFetch(
+        `/api/db/schema${tableName === undefined ? "" : `?table=${encodeURIComponent(tableName)}`}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        },
+      );
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new Error(error.error || "Failed to fetch table details");
+      }
+      return response.json();
+    },
+    [activeConnection],
+  );
+  const { ensureSchema, startSchemaLoad, isLoadingFullSchema } = useSchemaDetails(
+    activeConnection?.id,
+    schema,
+    setSchema,
+    loadDetails,
+  );
+
+  // Structural lists can load relationships in the background. A name-only
+  // inventory skips that bulk work and loads details only for requested tables.
   const fetchSchema = useCallback(
     async (conn: DatabaseConnection) => {
+      const isCurrent = startSchemaLoad();
       setIsLoadingSchema(true);
 
       const payload = conn.managed && conn.seedId ? { connectionId: `seed:${conn.seedId}` } : conn; // bare conn for backward compat with schema route
@@ -69,9 +96,13 @@ export function useConnectionManager(storageReady = false) {
           throw new Error(errorData.error || "Failed to fetch schema");
         }
         const list: TableSchema[] = await response.json();
+        if (!isCurrent()) return;
         setSchema(list);
         setSchemaError(null);
+        // Inventories defer all column/key/index reads until a table is requested.
+        if (list.some((table) => table.detailsLoaded === false)) return;
       } catch (error) {
+        if (!isCurrent()) return;
         const errorMessage = error instanceof Error ? error.message : "Unknown error";
         // Nothing read for THIS connection, so nothing may stay on screen as its
         // tables — the previous connection's list is not evidence about this one.
@@ -80,7 +111,7 @@ export function useConnectionManager(storageReady = false) {
         toast({ title: "Schema Error", description: errorMessage, variant: "destructive" });
         return; // finally still clears the loading flag; skip relations
       } finally {
-        setIsLoadingSchema(false);
+        if (isCurrent()) setIsLoadingSchema(false);
       }
 
       // Phase 2 — relationships + indexes (best-effort; never breaks the list)
@@ -91,6 +122,7 @@ export function useConnectionManager(storageReady = false) {
           throw new Error(errorData.error || "Failed to fetch schema relations");
         }
         const relations: TableRelations[] = await relRes.json();
+        if (!isCurrent()) return;
         const byName = new Map(relations.map((r) => [r.name, r]));
         setSchema((prev) =>
           prev.map((t) => {
@@ -105,7 +137,7 @@ export function useConnectionManager(storageReady = false) {
         });
       }
     },
-    [toast],
+    [toast, startSchemaLoad],
   );
 
   // Memoized derived values
@@ -322,7 +354,8 @@ export function useConnectionManager(storageReady = false) {
     schema,
     setSchema,
     schemaError,
-    isLoadingSchema,
+    isLoadingSchema: isLoadingSchema || isLoadingFullSchema,
+    ensureSchema,
     // Derived rather than reset in the pulse effect: with no active connection
     // there is nothing to report on, and the render already knows that.
     connectionPulse: activeConnection === null ? null : pulseState,

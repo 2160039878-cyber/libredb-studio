@@ -1,5 +1,6 @@
 "use client";
 
+import { SchemaLoadGate } from "@/components/schema-explorer/SchemaLoadGate";
 import React, { useMemo } from "react";
 import type { DatabaseConnection, QueryTab, TableSchema, QueryResult } from "@/lib/types";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
@@ -140,6 +141,7 @@ interface BottomPanelProps {
   onSetMode: (mode: BottomPanelMode) => void;
   currentTab: QueryTab;
   schema: TableSchema[];
+  onLoadSchema?: () => Promise<TableSchema[] | null>;
   schemaContext: string;
   activeConnection: DatabaseConnection | null;
   metadata: ProviderMetadata | null;
@@ -181,6 +183,7 @@ export function BottomPanel({
   onSetMode,
   currentTab,
   schema,
+  onLoadSchema,
   schemaContext,
   activeConnection,
   metadata,
@@ -458,7 +461,9 @@ export function BottomPanel({
                 databaseType={activeConnection?.type}
               />
             ) : mode === "docs" ? (
-              <DatabaseDocs schema={schema} schemaContext={schemaContext} databaseType={activeConnection?.type} />
+              <SchemaLoadGate key={activeConnection?.id} schema={schema} onLoadSchema={onLoadSchema}>
+                <DatabaseDocs schema={schema} schemaContext={schemaContext} databaseType={activeConnection?.type} />
+              </SchemaLoadGate>
             ) : mode === "history" ? (
               <QueryHistory
                 refreshTrigger={historyKey}
@@ -480,7 +485,9 @@ export function BottomPanel({
             ) : mode === "charts" ? (
               <DataCharts result={hydratedChart ?? currentTab.result} spec={hydratedChartSpec} />
             ) : mode === "schemadiff" ? (
-              <SchemaDiff schema={schema} connection={activeConnection} />
+              <SchemaLoadGate key={activeConnection?.id} schema={schema} onLoadSchema={onLoadSchema}>
+                <SchemaDiff schema={schema} connection={activeConnection} />
+              </SchemaLoadGate>
             ) : mode === "dashboard" ? (
               <ChartDashboard result={currentTab.result} />
             ) : mode === "explain" ? (

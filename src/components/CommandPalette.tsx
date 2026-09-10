@@ -74,6 +74,11 @@ export function CommandPalette({
   onLogout,
 }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const visibleTables = useMemo(() => {
+    if (schema.length <= 100) return schema;
+    return schema.filter((table) => table.name.toLowerCase().includes(search.toLowerCase())).slice(0, 100);
+  }, [schema, search]);
 
   // Register Cmd+K / Ctrl+K keyboard shortcut
   useEffect(() => {
@@ -81,6 +86,7 @@ export function CommandPalette({
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setOpen((prev) => !prev);
+        setSearch("");
       }
     };
     document.addEventListener("keydown", handleKeyDown);
@@ -106,7 +112,12 @@ export function CommandPalette({
       className="sm:max-w-[560px] bg-surface border-hairline-strong"
       showCloseButton={false}
     >
-      <CommandInput placeholder="Search tables, connections, queries, actions..." className="text-fg" />
+      <CommandInput
+        value={search}
+        onValueChange={setSearch}
+        placeholder="Search tables, connections, queries, actions..."
+        className="text-fg"
+      />
       <CommandList className="max-h-[400px]">
         <CommandEmpty className="text-fg-muted">No results found.</CommandEmpty>
 
@@ -180,13 +191,13 @@ export function CommandPalette({
 
         {/* Tables */}
         {schema.length > 0 && (
-          <CommandGroup heading="Tables">
-            {schema.map((table) => (
+          <CommandGroup heading={schema.length > 100 ? "Tables (up to 100 matches; type to narrow)" : "Tables"}>
+            {visibleTables.map((table) => (
               <CommandItem key={table.name} onSelect={() => runAction(() => onTableClick(table.name))}>
                 <Table2 strokeWidth={1.5} className="w-3.5 h-3.5 text-fg-muted" />
                 <span>{table.name}</span>
                 <span className="ml-auto text-xs text-fg-subtle">
-                  {table.columns.length} cols
+                  {table.detailsLoaded === false ? "Details on demand" : `${table.columns.length} cols`}
                   {table.rowCount !== undefined && ` / ${table.rowCount} rows`}
                 </span>
               </CommandItem>

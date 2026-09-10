@@ -30,10 +30,11 @@ mock.module("@/components/schema-explorer/TableItem", () => ({
 }));
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { render, within, cleanup } from "@testing-library/react";
+import { render, within, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 
+import { SchemaLoadGate } from "@/components/schema-explorer/SchemaLoadGate";
 import { SchemaExplorer } from "@/components/schema-explorer/SchemaExplorer";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
 import type { ProviderLabels } from "@/lib/db/types";
@@ -94,6 +95,73 @@ function createDefaultProps(overrides: Partial<Parameters<typeof SchemaExplorer>
 }
 
 describe("SchemaExplorer", () => {
+  test("lazy full-schema tools wait for explicit loading and can retry", async () => {
+    const pending = mockSchema.map((table) => ({ ...table, detailsLoaded: false }));
+    let resolve!: (value: typeof mockSchema | null) => void;
+    const load = mock(
+      () =>
+        new Promise<typeof mockSchema | null>((done) => {
+          resolve = done;
+        }),
+    );
+    const close = mock(() => {});
+    const view = render(
+      <SchemaLoadGate schema={pending} onLoadSchema={load} onClose={close}>
+        <div>Complete diagram</div>
+      </SchemaLoadGate>,
+    );
+    expect(view.queryByText("Complete diagram")).toBeNull();
+    expect(load).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole("button", { name: "Load full schema" }));
+    expect((view.getByRole("button", { name: "Loading full schema..." }) as HTMLButtonElement).disabled).toBe(true);
+    resolve(null);
+    await waitFor(() => expect(view.queryByRole("button", { name: "Load full schema" })).not.toBeNull());
+    fireEvent.click(view.getByRole("button", { name: "Close" }));
+    expect(close).toHaveBeenCalled();
+    view.rerender(
+      <SchemaLoadGate schema={mockSchema} onLoadSchema={load}>
+        <div>Complete diagram</div>
+      </SchemaLoadGate>,
+    );
+    expect(view.getByText("Complete diagram")).toBeDefined();
+  });
+
+  test("large schema pagination clamps after a refresh and resets when a search is cleared", async () => {
+    const user = userEvent.setup();
+    const schema = Array.from({ length: 201 }, (_, i) => ({ ...mockSchema[0], name: `table_${i}` }));
+    const view = render(<SchemaExplorer {...createDefaultProps({ schema })} />);
+    await user.click(view.getByRole("button", { name: "Next tables" }));
+    await user.click(view.getByRole("button", { name: "Previous tables" }));
+    expect(view.getByTestId("table-table_0")).toBeDefined();
+    await user.click(view.getByRole("button", { name: "Next tables" }));
+    view.rerender(<SchemaExplorer {...createDefaultProps({ schema: schema.slice(0, 101) })} />);
+    expect(view.getAllByTestId(/^table-/)).toHaveLength(1);
+    view.rerender(<SchemaExplorer {...createDefaultProps({ schema: schema.slice(0, 1) })} />);
+    expect(view.getByTestId("table-table_0")).toBeDefined();
+    await user.type(view.getByRole("textbox"), "table_0");
+    await user.clear(view.getByRole("textbox"));
+    expect(view.getByTestId("table-table_0")).toBeDefined();
+  });
+
+  test("large schemas render a bounded page and search all table names", async () => {
+    const user = userEvent.setup();
+    const schema = Array.from({ length: 43500 }, (_, i) => ({
+      name: `PS_${String(i).padStart(5, "0")}`,
+      columns: [],
+      indexes: [],
+      detailsLoaded: false,
+    }));
+    const { container } = render(<SchemaExplorer {...createDefaultProps({ schema })} />);
+    const view = within(container);
+    expect(view.queryAllByTestId(/^table-/)).toHaveLength(100);
+    await user.click(view.getByRole("button", { name: "Next tables" }));
+    expect(view.queryByTestId("table-PS_00100")).not.toBeNull();
+    expect(view.queryByTestId("table-PS_00000")).toBeNull();
+    await user.type(view.getByRole("textbox"), "PS_43499");
+    expect(view.queryAllByTestId(/^table-/)).toHaveLength(1);
+    expect(view.queryByTestId("table-PS_43499")).not.toBeNull();
+  });
+
   afterEach(() => {
     cleanup();
   });

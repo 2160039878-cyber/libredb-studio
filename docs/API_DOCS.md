@@ -699,7 +699,9 @@ Redis is a key-value store, so the `sql` field carries a Redis command instead o
 
 #### POST /api/db/schema
 
-Get database schema including tables, columns, indexes, and foreign keys.
+Get database schema including tables, columns, indexes, and foreign keys. Add the optional
+`?table=<tableName>` query parameter to fetch one table's full detail; without it, the complete
+schema is returned.
 
 **Authentication:** Required
 
@@ -768,6 +770,10 @@ Get database schema including tables, columns, indexes, and foreign keys.
   }
 ]
 ```
+
+With `?table=<tableName>`, the `200 OK` response uses the same full `TableSchema` shape in a
+single-element array. An empty `table` value returns `400 Bad Request`; a table that no longer
+exists or is not visible returns `404` with `{ "error": "Table no longer exists or is not visible" }`.
 
 **Response (503 Service Unavailable):**
 ```json
@@ -1315,6 +1321,7 @@ interface TableSchema {
   foreignKeys?: ForeignKeySchema[];
   rowCount?: number;       // Approximate row count
   size?: string;           // Table size (e.g., "2.4 MB")
+  detailsLoaded?: boolean;  // False for inventory entries until table detail is loaded
 }
 
 interface ColumnSchema {
@@ -1597,6 +1604,10 @@ curl -X POST http://localhost:3000/api/db/schema \
     "password": "postgres"
   }'
 ```
+
+Append `?table=<tableName>` to the same request to load one table's full detail. The response is a
+single-element array; an empty parameter returns `400`, and a missing or invisible table returns
+`404`.
 
 #### AI Explanation of a Plan
 ```bash

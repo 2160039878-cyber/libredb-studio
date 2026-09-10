@@ -1348,6 +1348,19 @@ describe("Studio", () => {
     expect(mockSetSchema).toHaveBeenCalledWith([]);
   });
 
+  test.each([true, false])("lazy standalone tools wait for details and stop on failure: %s", async (success) => {
+    const ensureSchema = mock(async () => (success ? [{ name: "users", columns: [], indexes: [] }] : null));
+    connMgrOverride = { schema: [{ name: "users", columns: [], indexes: [], detailsLoaded: false }], ensureSchema };
+    const view = render(<Studio />);
+    await act(async () => {
+      (capturedSidebarProps.onGenerateCode as (name: string) => void)("users");
+    });
+    expect(ensureSchema).toHaveBeenCalledWith("users");
+    expect(view.queryByTestId("codegenerator") !== null).toBe(success);
+    expect(capturedSidebarProps.onLoadTable).toBe(ensureSchema);
+    expect(capturedBottomPanelProps.onLoadSchema).toBe(ensureSchema);
+  });
+
   // --- Sidebar profiler/codegen/testdata callbacks ---
   test("Sidebar onProfileTable opens profiler", () => {
     const { queryByTestId } = render(<Studio />);

@@ -75,6 +75,45 @@ describe("useTabManager", () => {
     localStorage.clear();
   });
 
+  test.each([true, false])(
+    "lazy table actions wait for real columns before creating a query (execute: %s)",
+    async (execute) => {
+      const ensureSchema = mock(async () => testSchema);
+      const executeQuery = mock(() => {});
+      const { result } = renderHook(() =>
+        useTabManager({
+          activeConnection: makeConnection(),
+          metadata: defaultMetadata,
+          schema: [{ ...testSchema[0], columns: [], detailsLoaded: false }],
+          ensureSchema,
+        }),
+      );
+      await act(async () => {
+        if (execute) await result.current.handleTableClick("users", executeQuery);
+        else await result.current.handleGenerateSelect("users");
+      });
+      expect(ensureSchema).toHaveBeenCalledWith("users");
+      expect(result.current.tabs).toHaveLength(2);
+      if (!execute) expect(result.current.currentTab.query).toContain("id");
+    },
+  );
+
+  test.each([true, false])("lazy table actions stop when details could not be read (execute: %s)", async (execute) => {
+    const { result } = renderHook(() =>
+      useTabManager({
+        activeConnection: makeConnection(),
+        metadata: defaultMetadata,
+        schema: [{ ...testSchema[0], detailsLoaded: false }],
+        ensureSchema: async () => null,
+      }),
+    );
+    await act(async () => {
+      if (execute) await result.current.handleTableClick("users", () => {});
+      else await result.current.handleGenerateSelect("users");
+    });
+    expect(result.current.tabs).toHaveLength(1);
+  });
+
   test("starts with one default tab", () => {
     const { result } = renderHook(() =>
       useTabManager({

@@ -414,6 +414,19 @@ describe("StudioWorkspace", () => {
   // Rendering
   // =========================================================================
 
+  test.each([true, false])("lazy embedded tools wait for details and stop on failure: %s", async (success) => {
+    const ensureSchema = mock(async () => (success ? [usersTable] : null));
+    connAdapterOverride = { schema: [{ ...usersTable, detailsLoaded: false }], ensureSchema };
+    renderWorkspace();
+    await act(async () => {
+      (capturedSidebarProps.onGenerateCode as (name: string) => void)("users");
+    });
+    expect(ensureSchema).toHaveBeenCalledWith("users");
+    expect(capturedCodeGeneratorProps.isOpen).toBe(success);
+    expect(capturedSidebarProps.onLoadTable).toBe(ensureSchema);
+    expect(capturedBottomPanelProps.onLoadSchema).toBe(ensureSchema);
+  });
+
   test("renders shell with sidebar, tab bar, toolbar, editor and bottom panel", () => {
     const { getByTestId, queryByTestId } = renderWorkspace();
     expect(getByTestId("sidebar").textContent).toBe("Sidebar");

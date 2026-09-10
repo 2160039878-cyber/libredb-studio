@@ -36,9 +36,16 @@ interface UseTabManagerParams {
   metadata: ProviderMetadata | null;
   schema: TableSchema[];
   persistWorkspace?: boolean;
+  ensureSchema?: (tableName: string) => Promise<TableSchema[] | null>;
 }
 
-export function useTabManager({ activeConnection, metadata, schema, persistWorkspace }: UseTabManagerParams) {
+export function useTabManager({
+  activeConnection,
+  metadata,
+  schema,
+  persistWorkspace,
+  ensureSchema,
+}: UseTabManagerParams) {
   const [tabs, setTabs] = useState<QueryTab[]>([DEFAULT_TAB]);
   const [activeTabId, setActiveTabId] = useState<string>("default");
   const [editingTabId, setEditingTabId] = useState<string | null>(null);
@@ -183,12 +190,17 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
 
   // handleTableClick takes executeQuery as callback param to avoid circular dependency
   const handleTableClick = useCallback(
-    (tableName: string, executeQueryFn: (query: string, tabId: string) => void) => {
+    async (tableName: string, executeQueryFn: (query: string, tabId: string) => void) => {
       const capabilities = metadata?.capabilities;
       // Look the table up exactly as handleGenerateSelect does: the Redis
       // generator is type-aware, and the sampled key type lives on the schema
       // node's `type` column (#427).
-      const table = schema.find((t) => t.name === tableName);
+      let table = schema.find((t) => t.name === tableName);
+      if (table?.detailsLoaded === false) {
+        const details = await ensureSchema?.(tableName);
+        if (!details) return;
+        table = details[0];
+      }
       const columns = table?.columns || [];
       const newQuery = capabilities
         ? generateTableQuery(tableName, capabilities, columns)
@@ -207,13 +219,18 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
       setActiveTabId(newId);
       setTimeout(() => executeQueryFn(newQuery, newId), 100);
     },
-    [metadata, schema],
+    [metadata, schema, ensureSchema],
   );
 
   const handleGenerateSelect = useCallback(
-    (tableName: string) => {
+    async (tableName: string) => {
       const capabilities = metadata?.capabilities;
-      const table = schema.find((t) => t.name === tableName);
+      let table = schema.find((t) => t.name === tableName);
+      if (table?.detailsLoaded === false) {
+        const details = await ensureSchema?.(tableName);
+        if (!details) return;
+        table = details[0];
+      }
       const columns = table?.columns || [];
 
       const newQuery = capabilities
@@ -236,7 +253,7 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
       ]);
       setActiveTabId(newId);
     },
-    [metadata, schema],
+    [metadata, schema, ensureSchema],
   );
 
   return {

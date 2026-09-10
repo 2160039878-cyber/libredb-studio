@@ -582,11 +582,14 @@ export interface DatabaseProvider {
   getSchema(): Promise<TableSchema[]>;
 
   /**
-   * Fast structural schema (tables + columns + PKs), excluding the expensive
-   * foreign-key/index introspection. Optional: providers that don't implement
-   * it fall back to getSchema(). Pairs with getSchemaRelations().
+   * Fast schema list. May include columns/PKs (paired with getSchemaRelations),
+   * or name-only entries marked detailsLoaded:false (paired with getTableSchema).
+   * Providers without this method fall back to getSchema().
    */
   getSchemaList?(): Promise<TableSchema[]>;
+
+  /** Load one inventory entry without scanning the other tables. Null means it no longer exists. */
+  getTableSchema?(tableName: string): Promise<TableSchema | null>;
 
   /**
    * Heavy relationship/index data (foreign keys + indexes) keyed by table

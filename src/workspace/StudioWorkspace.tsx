@@ -1,5 +1,7 @@
 "use client";
 
+import { SchemaLoadGate } from "@/components/schema-explorer/SchemaLoadGate";
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Sidebar } from "@/components/sidebar";
 // MobileNav and mobile tab panels excluded in embedded mode — platform provides its own navigation
@@ -165,6 +167,8 @@ export function StudioWorkspace({
   currentUser,
   onQueryExecute,
   onSchemaFetch,
+  onSchemaListFetch,
+  onTableSchemaFetch,
   onSaveQuery: onSaveQueryProp,
   // onLoadSavedQueries — reserved for future saved-queries panel integration
   features: featuresProp,
@@ -180,6 +184,8 @@ export function StudioWorkspace({
   const conn = useConnectionAdapter({
     connections: externalConnections,
     onSchemaFetch,
+    onSchemaListFetch,
+    onTableSchemaFetch,
   });
 
   // 2. Tab Manager (pure UI state, reused as-is)
@@ -187,6 +193,7 @@ export function StudioWorkspace({
     activeConnection: conn.activeConnection,
     metadata: conn.metadata,
     schema: conn.schema,
+    ensureSchema: conn.ensureSchema,
   });
 
   // 3. Query Adapter (platform-delegated execution)
@@ -273,6 +280,16 @@ export function StudioWorkspace({
     [tabMgr.currentTab, conn.activeConnection?.type],
   );
 
+  const openTableTool = (name: string, open: (name: string) => void) => {
+    if (conn.schema.find((table) => table.name === name)?.detailsLoaded === false) {
+      void conn.ensureSchema(name).then((details) => {
+        if (details) open(name);
+      });
+    } else {
+      open(name);
+    }
+  };
+
   // === Table click handler ===
   const onTableClick = useCallback(
     (tableName: string) => {
@@ -310,6 +327,7 @@ export function StudioWorkspace({
           <>
             <ResizablePanel id="workspace-sidebar" defaultSize="22" minSize="15" maxSize="35">
               <Sidebar
+                onLoadTable={conn.ensureSchema}
                 connections={conn.connections}
                 activeConnection={conn.activeConnection}
                 schema={conn.schema}
@@ -326,9 +344,15 @@ export function StudioWorkspace({
                 onOpenMaintenance={noop}
                 databaseType={conn.activeConnection?.type}
                 metadata={conn.metadata}
-                onProfileTable={features.codeGenerator ? (name: string) => setProfilerTable(name) : undefined}
-                onGenerateCode={features.codeGenerator ? (name: string) => setCodeGenTable(name) : undefined}
-                onGenerateTestData={features.testDataGenerator ? (name: string) => setTestDataTable(name) : undefined}
+                onProfileTable={
+                  features.codeGenerator ? (name: string) => openTableTool(name, setProfilerTable) : undefined
+                }
+                onGenerateCode={
+                  features.codeGenerator ? (name: string) => openTableTool(name, setCodeGenTable) : undefined
+                }
+                onGenerateTestData={
+                  features.testDataGenerator ? (name: string) => openTableTool(name, setTestDataTable) : undefined
+                }
               />
             </ResizablePanel>
             <ResizableHandle className="w-1 bg-transparent hover:bg-brand-tint/30 transition-colors" />
@@ -364,7 +388,15 @@ export function StudioWorkspace({
                       <React.Suspense
                         fallback={<ViewLoading label="Loading the diagram" className="absolute inset-0 z-20" />}
                       >
-                        <SchemaDiagram schema={conn.schema} onClose={() => setShowDiagram(false)} />
+                        <SchemaLoadGate
+                          key={conn.activeConnection?.id}
+                          schema={conn.schema}
+                          onLoadSchema={conn.ensureSchema}
+                          onClose={() => setShowDiagram(false)}
+                          className="absolute inset-0 z-20"
+                        >
+                          <SchemaDiagram schema={conn.schema} onClose={() => setShowDiagram(false)} />
+                        </SchemaLoadGate>
                       </React.Suspense>
                     </ChunkBoundary>
                   )}
@@ -423,6 +455,7 @@ export function StudioWorkspace({
                     <ResizableHandle className="h-1 bg-fill hover:bg-brand-tint/20" />
                     <ResizablePanel id="workspace-editor-bottom" defaultSize="60" minSize="20">
                       <BottomPanel
+                        onLoadSchema={conn.ensureSchema}
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
                         currentTab={tabMgr.currentTab}

@@ -154,15 +154,20 @@ deliberately stricter than node-oracledb's tokenizer, which opens a q-string at 
 `q`/`Q` whatever comes before it; the strict side is the one whose mistake costs a bound — and, since
 #297, a confirmation prompt on that statement — rather than a misplaced clause.
 
-### 3.3 Owner-scoped, five-query schema introspection
+### 3.3 Owner-scoped, two-phase schema introspection
 
-`getSchema()` ([`oracle.ts`](../../src/lib/db/providers/sql/oracle.ts)) runs **five bulk queries**
-over the `ALL_*` data-dictionary views — tables, columns, primary keys, foreign keys, indexes —
-all filtered by `OWNER = :1` (the connecting user, upper-cased) and then **grouped in memory** by
-table. This is neither the Postgres single-CTE approach nor MySQL's per-table N+1: it is a fixed
-5 round-trips regardless of table count. There is no `getSchemaList()`/`getSchemaRelations()`
-(no two-phase split), and the returned `TableSchema` has **no `size` field** (only `rowCount` from
-`NUM_ROWS`, an optimizer estimate that can be stale/`NULL`).
+Automatic connection and DDL refresh use `getSchemaList()` ([`oracle.ts`](../../src/lib/db/providers/sql/oracle.ts)).
+It reads only `ALL_TABLES`, filtered by `OWNER = :1` (the connecting user, upper-cased), and returns
+table names plus the estimated `NUM_ROWS`. Each entry has `detailsLoaded: false` and empty
+`columns`, `indexes`, and `foreignKeys` arrays. Expanding a table or using a table-level tool calls
+`getTableSchema(tableName)`, which runs the five detail queries with both owner and table name bound
+on every query; it returns `null` when no matching visible table exists.
+
+`getSchema()` remains the full-schema path and runs the five bulk queries over the `ALL_*`
+data-dictionary views — tables, columns, primary keys, foreign keys, and indexes — all filtered by
+`OWNER = :1` and grouped in memory. This is a fixed five round-trips regardless of table count.
+There is still no `getSchemaRelations()`, and the returned `TableSchema` has **no `size` field**
+(only `rowCount` from `NUM_ROWS`, an optimizer estimate that can be stale/`NULL`).
 
 ### 3.4 No transaction auto-rollback timeout
 
@@ -832,8 +837,8 @@ Surfaced via `POST /api/db/transaction`.
 
 ## 7. Schema introspection
 
-`getSchema()` returns one `TableSchema` per table owned by the connecting user. Five `ALL_*` queries
-(`OWNER = :user`), grouped client-side:
+`getSchema()` remains the complete schema read: one `TableSchema` per table owned by the connecting
+user, populated by five `ALL_*` queries (`OWNER = :user`) grouped client-side:
 
 | Data | Source view(s) |
 |------|----------------|
@@ -843,7 +848,15 @@ Surfaced via `POST /api/db/transaction`.
 | Foreign keys | `ALL_CONSTRAINTS` (type `'R'`) joined to the referenced constraint's columns |
 | Indexes | `ALL_INDEXES` + `ALL_IND_COLUMNS` (`unique` = `UNIQUENESS = 'UNIQUE'`) |
 
-No `getSchemaList()`/`getSchemaRelations()`; no `size` on the returned tables (see [§3.3](#33-owner-scoped-five-query-schema-introspection)).
+`getSchemaList()` is the fast inventory used by automatic connection and DDL refresh. It reads only
+`ALL_TABLES` and returns names plus estimated `NUM_ROWS`, with `detailsLoaded: false` and empty
+`columns`, `indexes`, and `foreignKeys`. Table expansion and table-level tools call
+`getTableSchema(tableName)`, which repeats the five queries with `OWNER` and `TABLE_NAME` bound on
+each query and returns `null` when the table is not visible. There is no `getSchemaRelations()`;
+tables have no `size` field (see [§3.3](#33-owner-scoped-two-phase-schema-introspection)).
+
+Both shells show 100 tables per page and search all table names plus loaded columns. ERD, Docs, and
+SchemaDiff require the user to click **Load full schema**; the full read may still be expensive.
 
 ---
 
@@ -1235,12 +1248,15 @@ const provider = await createDatabaseProvider({
 
 await provider.connect();
 const res = await provider.query('SELECT id, email FROM users WHERE active = :1', [1]);
-const schema = await provider.getSchema();   // 5 ALL_* queries, grouped in memory
+const tables = await provider.getSchemaList();       // 1 ALL_TABLES query; detailsLoaded: false
+const users = await provider.getTableSchema('USERS'); // 5 owner/table-bound queries, or null
+const schema = await provider.getSchema();            // full 5 ALL_* queries, grouped in memory
 await provider.disconnect();
 ```
 
 Over the API: `POST /api/db/query`, `POST /api/db/transaction`, `POST /api/db/cancel`,
-`POST /api/db/maintenance` (admin), `POST /api/db/schema/list` (falls back to `getSchema()`).
+`POST /api/db/maintenance` (admin), `POST /api/db/schema/list` (fast inventory), and
+`POST /api/db/schema?table=...` (one-element detail response or 404).
 
 ---
 
@@ -1324,7 +1340,10 @@ Over the API: `POST /api/db/query`, `POST /api/db/transaction`, `POST /api/db/ca
   ([§7.2](#72-when-the-connection-count-is-not-measurable)). `getPerformanceMetrics()` reports only the cache-hit ratio (no QPS,
   deadlocks, or buffer-pool usage), and **omits even that** when `V$SYSSTAT` is unreadable rather
   than substituting a figure — [§7.1](#71-when-the-cache-hit-ratio-is-not-measurable).
-- **No two-phase schema loading** — `/api/db/schema/list` falls back to the full `getSchema()`.
+- **Schema loading is two-phase.** Automatic connection and DDL refresh use the cheap
+  `getSchemaList()` inventory; table expansion and table-level tools load one table on demand.
+  Both shells use the same 100-row paging and search table names plus loaded columns. ERD, Docs, and
+  SchemaDiff require **Load full schema**, and that complete read may still be expensive.
 
 ---
 

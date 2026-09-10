@@ -18,6 +18,7 @@ interface SchemaExplorerProps {
    * both mean "nothing failed", not "nothing was wrong".
    */
   schemaError?: string | null;
+  onLoadTable?: (tableName: string) => Promise<TableSchema[] | null>;
   onTableClick?: (tableName: string) => void;
   onGenerateSelect?: (tableName: string) => void;
   onCreateTableClick?: () => void;
@@ -34,6 +35,7 @@ export function SchemaExplorer({
   schema,
   isLoadingSchema,
   schemaError = null,
+  onLoadTable,
   onTableClick,
   onGenerateSelect,
   onCreateTableClick,
@@ -46,6 +48,7 @@ export function SchemaExplorer({
 }: SchemaExplorerProps) {
   const labels = metadata?.labels;
   const capabilities = metadata?.capabilities;
+  const [page, setPage] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
 
@@ -71,6 +74,12 @@ export function SchemaExplorer({
       return tableNameMatch || columnMatch;
     });
   }, [schema, searchQuery]);
+
+  const pageSize = 100;
+  const lastPage = Math.max(0, Math.ceil(filteredSchema.length / pageSize) - 1);
+  const currentPage = Math.min(page, lastPage);
+  const visibleSchema = filteredSchema.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+  const hasUnloadedTables = schema.some((table) => table.detailsLoaded === false);
 
   if (isLoadingSchema) {
     return (
@@ -166,25 +175,61 @@ export function SchemaExplorer({
             className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground group-focus-within:text-brand transition-colors"
           />
           <Input
-            placeholder={labels?.searchPlaceholder || "Search tables or columns..."}
+            placeholder={
+              hasUnloadedTables
+                ? "Search tables or loaded columns..."
+                : labels?.searchPlaceholder || "Search tables or columns..."
+            }
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setPage(0);
+            }}
             className="h-8 pl-8 pr-8 text-xs bg-muted/50 border-border focus-visible:ring-1 focus-visible:ring-brand-tint/50 placeholder:text-muted-foreground/50"
           />
           {searchQuery && (
             <button
-              onClick={() => setSearchQuery("")}
+              onClick={() => {
+                setSearchQuery("");
+                setPage(0);
+              }}
               className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
               <Hash strokeWidth={1.5} className="w-3.5 h-3.5 rotate-45" />
             </button>
           )}
         </div>
+        {lastPage > 0 && (
+          <nav aria-label="Table pages" className="flex items-center justify-between text-xs">
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Previous tables"
+              disabled={currentPage === 0}
+              onClick={() => setPage(currentPage - 1)}
+            >
+              Previous
+            </Button>
+            <span aria-live="polite">
+              {currentPage * pageSize + 1}–{Math.min((currentPage + 1) * pageSize, filteredSchema.length)} of{" "}
+              {filteredSchema.length}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label="Next tables"
+              disabled={currentPage === lastPage}
+              onClick={() => setPage(currentPage + 1)}
+            >
+              Next
+            </Button>
+          </nav>
+        )}
       </div>
 
       <div className="px-2 space-y-1">
         <AnimatePresence mode="popLayout">
-          {filteredSchema.map((table) => (
+          {visibleSchema.map((table) => (
             <TableItem
               key={table.name}
               table={table}
@@ -193,6 +238,7 @@ export function SchemaExplorer({
               labels={labels}
               capabilities={capabilities}
               isAdmin={isAdmin}
+              onLoadTable={onLoadTable}
               onTableClick={onTableClick}
               onGenerateSelect={onGenerateSelect}
               onProfileTable={onProfileTable}

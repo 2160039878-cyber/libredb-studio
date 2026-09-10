@@ -765,28 +765,62 @@ export class OracleProvider extends SQLBaseProvider {
   // Schema Operations
   // ============================================================================
 
-  public async getSchema(): Promise<TableSchema[]> {
+  public async getSchemaList(): Promise<TableSchema[]> {
+    this.ensureConnected();
+    const conn = await this.pool!.getConnection();
+    try {
+      const result = await conn.execute(
+        "SELECT TABLE_NAME, NUM_ROWS FROM ALL_TABLES WHERE OWNER = :1 ORDER BY TABLE_NAME",
+        [this.config.user?.toUpperCase() || ""],
+        { outFormat: oracledb.OUT_FORMAT_OBJECT },
+      );
+      return ((result.rows || []) as Record<string, unknown>[]).map((row) => ({
+        name: String(row.TABLE_NAME || ""),
+        rowCount: Number(row.NUM_ROWS || 0),
+        columns: [],
+        indexes: [],
+        foreignKeys: [],
+        detailsLoaded: false,
+      }));
+    } finally {
+      await conn.close();
+    }
+  }
+
+  public getSchema(): Promise<TableSchema[]> {
+    return this.loadSchema();
+  }
+
+  public async getTableSchema(tableName: string): Promise<TableSchema | null> {
+    return (await this.loadSchema(tableName))[0] ?? null;
+  }
+
+  private async loadSchema(tableName?: string): Promise<TableSchema[]> {
     this.ensureConnected();
 
     let conn: oracledb.Connection | undefined;
     try {
       conn = await this.pool!.getConnection();
       const owner = this.config.user?.toUpperCase() || "";
+      const params = tableName === undefined ? [owner] : [owner, tableName];
+      // Each catalog starts with the owner bind. Keep that bind first and constrain
+      // every detail query on the server, before materializing any catalog rows.
+      const read = (sql: string, tableColumn = "TABLE_NAME") =>
+        conn!.execute(tableName === undefined ? sql : sql.replace(":1", `:1 AND ${tableColumn} = :2`), params, {
+          outFormat: oracledb.OUT_FORMAT_OBJECT,
+        });
 
       // Get tables
-      const tablesRes = await conn.execute(
-        `SELECT TABLE_NAME, NUM_ROWS FROM ALL_TABLES WHERE OWNER = :1 ORDER BY TABLE_NAME`,
-        [owner],
-        { outFormat: oracledb.OUT_FORMAT_OBJECT },
-      );
+      const tablesRes = await read(`SELECT TABLE_NAME, NUM_ROWS FROM ALL_TABLES WHERE OWNER = :1 ORDER BY TABLE_NAME`);
       const tables = (tablesRes.rows || []) as Record<string, unknown>[];
+      if (tableName !== undefined && tables.length === 0) return [];
 
       // Get columns
-      const colsRes = await conn.execute(SCHEMA_COLUMNS_SQL, [owner], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const colsRes = await read(SCHEMA_COLUMNS_SQL);
       const allCols = (colsRes.rows || []) as Record<string, unknown>[];
 
       // Get primary keys
-      const pkRes = await conn.execute(SCHEMA_PRIMARY_KEYS_SQL, [owner], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const pkRes = await read(SCHEMA_PRIMARY_KEYS_SQL, "ac.TABLE_NAME");
       const pkRows = (pkRes.rows || []) as Record<string, unknown>[];
       const pkMap = new Map<string, Set<string>>();
       for (const row of pkRows) {
@@ -797,11 +831,11 @@ export class OracleProvider extends SQLBaseProvider {
       }
 
       // Get foreign keys
-      const fkRes = await conn.execute(SCHEMA_FOREIGN_KEYS_SQL, [owner], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const fkRes = await read(SCHEMA_FOREIGN_KEYS_SQL, "ac.TABLE_NAME");
       const fkRows = (fkRes.rows || []) as Record<string, unknown>[];
 
       // Get indexes
-      const idxRes = await conn.execute(SCHEMA_INDEXES_SQL, [owner], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+      const idxRes = await read(SCHEMA_INDEXES_SQL, "ai.TABLE_NAME");
       const idxRows = (idxRes.rows || []) as Record<string, unknown>[];
 
       // Group columns, indexes, foreign keys by table

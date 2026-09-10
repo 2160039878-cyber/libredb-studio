@@ -40,6 +40,7 @@ interface TableItemProps {
   table: TableSchema;
   isExpanded: boolean;
   onToggle: () => void;
+  onLoadTable?: (tableName: string) => Promise<TableSchema[] | null>;
   // `labels` is itself optional on ProviderMetadata, so the indexed access already
   // carries `undefined`; NonNullable keeps the `?` from restating it (#427).
   labels?: NonNullable<ProviderMetadata["labels"]>;
@@ -193,6 +194,7 @@ export const TableItem = React.memo(function TableItem({
   table,
   isExpanded,
   onToggle,
+  onLoadTable,
   labels,
   capabilities,
   isAdmin,
@@ -203,6 +205,15 @@ export const TableItem = React.memo(function TableItem({
   onGenerateTestData,
   onOpenMaintenance,
 }: TableItemProps) {
+  const [loadingDetails, setLoadingDetails] = React.useState(false);
+  const loadDetails = async () => {
+    setLoadingDetails(true);
+    try {
+      await onLoadTable?.(table.name);
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
   const copyToClipboard = (text: string, label: string) => {
     // The toast waits for the write to report an outcome (B43). It used to fire in the
     // same statement that started it, which announced a copy that never happened over
@@ -237,7 +248,10 @@ export const TableItem = React.memo(function TableItem({
               type="button"
               aria-expanded={isExpanded}
               className="flex items-center gap-1.5 flex-1 min-w-0 py-1.5 cursor-pointer text-left"
-              onClick={onToggle}
+              onClick={() => {
+                onToggle();
+                if (!isExpanded && table.detailsLoaded === false && !loadingDetails) void loadDetails();
+              }}
             >
               <motion.div animate={{ rotate: isExpanded ? 90 : 0 }} transition={{ duration: 0.2 }} className="shrink-0">
                 <ChevronRight strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" />
@@ -317,7 +331,19 @@ export const TableItem = React.memo(function TableItem({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <ColumnList columns={table.columns} indexes={table.indexes} />
+            {table.detailsLoaded === false ? (
+              <div className="px-6 py-2 text-xs text-muted-foreground">
+                {loadingDetails ? (
+                  <output>Loading table details...</output>
+                ) : (
+                  <Button variant="ghost" size="sm" disabled={!onLoadTable} onClick={loadDetails}>
+                    Load table details
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <ColumnList columns={table.columns} indexes={table.indexes} />
+            )}
           </motion.div>
         )}
       </AnimatePresence>

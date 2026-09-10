@@ -192,6 +192,8 @@ export interface DatabaseConnection {
 
 export interface TableSchema {
   name: string;
+  /** False for a table-name inventory entry whose columns/keys/indexes have not been loaded. */
+  detailsLoaded?: boolean;
   columns: ColumnSchema[];
   indexes: IndexSchema[];
   foreignKeys?: ForeignKeySchema[];

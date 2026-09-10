@@ -62,6 +62,69 @@ describe("useConnectionManager", () => {
     restoreGlobalFetch();
   });
 
+  test("lazy standalone inventory skips bulk relations and binds an encoded table request", async () => {
+    const name = 'Weird & "table';
+    const full = { ...makeSchema()[0], name };
+    const list = [
+      { ...full, columns: [], indexes: [], detailsLoaded: false },
+      { ...makeSchema()[1], detailsLoaded: false },
+    ];
+    const fetchMock = mockGlobalFetch({
+      "/api/db/schema/list": { json: list },
+      "/api/db/schema": async (req) => {
+        expect(new URL(req.url).searchParams.get("table")).toBe(name);
+        expect(await req.json()).toEqual({ connectionId: "seed:oracle" });
+        return { json: [full] };
+      },
+    });
+    const { result } = renderHook(() => useConnectionManager());
+    const conn = makeConnection({ managed: true, seedId: "oracle" });
+    act(() => result.current.setActiveConnection(conn));
+    await act(async () => {
+      await result.current.fetchSchema(conn);
+    });
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("schema/relations"))).toHaveLength(0);
+    await act(async () => {
+      await result.current.ensureSchema(name);
+    });
+    expect(result.current.schema).toEqual([full, list[1]]);
+  });
+
+  test.each(["catalog denied", null])("lazy standalone failed details preserve the inventory: %s", async (message) => {
+    const list = makeSchema().map((table) => ({ ...table, detailsLoaded: false }));
+    mockGlobalFetch({
+      "/api/db/schema": message ? { status: 403, json: { error: message } } : { status: 500, text: "invalid JSON" },
+    });
+    const { result } = renderHook(() => useConnectionManager());
+    act(() => {
+      result.current.setActiveConnection(makeConnection());
+      result.current.setSchema(list);
+    });
+    await act(async () => {
+      expect(await result.current.ensureSchema("users")).toBeNull();
+    });
+    expect(result.current.schema).toEqual(list);
+  });
+
+  test("lazy standalone explicit full request has no table filter", async () => {
+    const full = makeSchema();
+    mockGlobalFetch({
+      "/api/db/schema": (req) => {
+        expect(new URL(req.url).search).toBe("");
+        return { json: full };
+      },
+    });
+    const { result } = renderHook(() => useConnectionManager());
+    act(() => {
+      result.current.setActiveConnection(makeConnection());
+      result.current.setSchema(full.map((table) => ({ ...table, detailsLoaded: false })));
+    });
+    await act(async () => {
+      await result.current.ensureSchema();
+    });
+    expect(result.current.schema).toEqual(full);
+  });
+
   // ── Initial State ─────────────────────────────────────────────────────────
 
   test("starts with empty connections and null activeConnection", () => {

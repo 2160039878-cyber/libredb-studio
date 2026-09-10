@@ -1,5 +1,7 @@
 "use client";
 
+import { SchemaLoadGate } from "@/components/schema-explorer/SchemaLoadGate";
+
 import { appFetch } from "@/lib/config/base-path";
 import React, { useState, useEffect, useRef } from "react";
 import { Sidebar, ConnectionsList } from "@/components/sidebar";
@@ -107,6 +109,7 @@ export default function Studio() {
     activeConnection: conn.activeConnection,
     metadata,
     schema: conn.schema,
+    ensureSchema: conn.ensureSchema,
   });
 
   // 4. Transaction Control
@@ -393,6 +396,16 @@ export default function Studio() {
     downloadText(file.content, file.mimeType, resultExportFileName(file.extension, hydrated?.runId));
   };
 
+  const openTableTool = (name: string, open: (name: string) => void) => {
+    if (conn.schema.find((table) => table.name === name)?.detailsLoaded === false) {
+      void conn.ensureSchema(name).then((details) => {
+        if (details) open(name);
+      });
+    } else {
+      open(name);
+    }
+  };
+
   const onTableClick = (tableName: string) => {
     tabMgr.handleTableClick(tableName, queryExec.executeQuery);
   };
@@ -481,6 +494,7 @@ export default function Studio() {
           <>
             <ResizablePanel id="studio-sidebar" defaultSize="22" minSize="15" maxSize="35">
               <Sidebar
+                onLoadTable={conn.ensureSchema}
                 connections={conn.connections}
                 activeConnection={conn.activeConnection}
                 schema={conn.schema}
@@ -501,9 +515,9 @@ export default function Studio() {
                 onOpenMaintenance={openMaintenance}
                 databaseType={conn.activeConnection?.type}
                 metadata={metadata}
-                onProfileTable={(name) => setProfilerTable(name)}
-                onGenerateCode={(name) => setCodeGenTable(name)}
-                onGenerateTestData={(name) => setTestDataTable(name)}
+                onProfileTable={(name) => openTableTool(name, setProfilerTable)}
+                onGenerateCode={(name) => openTableTool(name, setCodeGenTable)}
+                onGenerateTestData={(name) => openTableTool(name, setTestDataTable)}
               />
             </ResizablePanel>
             <ResizableHandle className="w-1 bg-transparent hover:bg-brand-tint/30 transition-colors" />
@@ -578,7 +592,15 @@ export default function Studio() {
                     <React.Suspense
                       fallback={<ViewLoading label="Loading the diagram" className="absolute inset-0 z-20" />}
                     >
-                      <SchemaDiagram schema={conn.schema} onClose={() => setShowDiagram(false)} />
+                      <SchemaLoadGate
+                        key={conn.activeConnection?.id}
+                        schema={conn.schema}
+                        onLoadSchema={conn.ensureSchema}
+                        onClose={() => setShowDiagram(false)}
+                        className="absolute inset-0 z-20"
+                      >
+                        <SchemaDiagram schema={conn.schema} onClose={() => setShowDiagram(false)} />
+                      </SchemaLoadGate>
                     </React.Suspense>
                   </ChunkBoundary>
                 )}
@@ -616,6 +638,8 @@ export default function Studio() {
                 <div className="md:hidden h-full bg-sunken overflow-auto p-4">
                   {conn.activeConnection ? (
                     <SchemaExplorer
+                      key={conn.activeConnection?.id}
+                      onLoadTable={conn.ensureSchema}
                       schema={conn.schema}
                       isLoadingSchema={conn.isLoadingSchema}
                       schemaError={conn.schemaError}
@@ -632,9 +656,9 @@ export default function Studio() {
                       onOpenMaintenance={openMaintenance}
                       databaseType={conn.activeConnection?.type}
                       metadata={metadata}
-                      onProfileTable={(name) => setProfilerTable(name)}
-                      onGenerateCode={(name) => setCodeGenTable(name)}
-                      onGenerateTestData={(name) => setTestDataTable(name)}
+                      onProfileTable={(name) => openTableTool(name, setProfilerTable)}
+                      onGenerateCode={(name) => openTableTool(name, setCodeGenTable)}
+                      onGenerateTestData={(name) => openTableTool(name, setTestDataTable)}
                     />
                   ) : (
                     <div className="flex flex-col items-center justify-center h-full text-fg-muted">
@@ -687,6 +711,7 @@ export default function Studio() {
                     <ResizableHandle className="h-1 bg-fill hover:bg-brand-tint/20" />
                     <ResizablePanel id="studio-editor-bottom" defaultSize="60" minSize="20">
                       <BottomPanel
+                        onLoadSchema={conn.ensureSchema}
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
                         currentTab={tabMgr.currentTab}

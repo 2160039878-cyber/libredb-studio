@@ -41,6 +41,69 @@ const makeSchema = (): TableSchema[] => [
 // useConnectionAdapter Tests
 // =============================================================================
 describe("useConnectionAdapter", () => {
+  test("lazy embedded inventory reads one table and full schema only when requested", async () => {
+    const full = makeSchema();
+    const list = full.map((table) => ({ ...table, columns: [], indexes: [], detailsLoaded: false }));
+    const onSchemaFetch = mock(async () => full);
+    const onSchemaListFetch = mock(async () => list);
+    const onTableSchemaFetch = mock(
+      async (_id: string, name: string) => full.find((table) => table.name === name) ?? null,
+    );
+    const { result } = renderHook(() =>
+      useConnectionAdapter({
+        connections: [makeWorkspaceConnection()],
+        onSchemaFetch,
+        onSchemaListFetch,
+        onTableSchemaFetch,
+      }),
+    );
+    await act(async () => {
+      await result.current.fetchSchema(result.current.activeConnection!);
+    });
+    expect(result.current.schema).toEqual(list);
+    expect(onSchemaFetch).not.toHaveBeenCalled();
+    await act(async () => {
+      await result.current.ensureSchema("users");
+    });
+    expect(onTableSchemaFetch).toHaveBeenCalledWith("ws-conn-1", "users");
+    expect(result.current.schema).toEqual([full[0], list[1]]);
+    await act(async () => {
+      await result.current.ensureSchema();
+    });
+    expect(result.current.schema).toEqual(full);
+    expect(onSchemaFetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("lazy embedded table loading falls back to the required full reader", async () => {
+    const full = makeSchema();
+    const onSchemaFetch = mock(async () => full);
+    const { result } = renderHook(() =>
+      useConnectionAdapter({ connections: [makeWorkspaceConnection()], onSchemaFetch }),
+    );
+    act(() => result.current.setSchema(full.map((table) => ({ ...table, detailsLoaded: false }))));
+    await act(async () => {
+      await result.current.ensureSchema("users");
+    });
+    expect(result.current.schema[0]).toEqual(full[0]);
+    expect(result.current.schema[1].detailsLoaded).toBe(false);
+  });
+
+  test("lazy embedded missing tables leave their inventory entry retryable", async () => {
+    const full = makeSchema();
+    const { result } = renderHook(() =>
+      useConnectionAdapter({
+        connections: [makeWorkspaceConnection()],
+        onSchemaFetch: async () => full,
+        onTableSchemaFetch: async () => null,
+      }),
+    );
+    act(() => result.current.setSchema(full.map((table) => ({ ...table, detailsLoaded: false }))));
+    await act(async () => {
+      expect(await result.current.ensureSchema("users")).toBeNull();
+    });
+    expect(result.current.schema[0].detailsLoaded).toBe(false);
+  });
+
   // ── Initializes with first connection as active ─────────────────────────
 
   test("initializes with first connection as active", () => {

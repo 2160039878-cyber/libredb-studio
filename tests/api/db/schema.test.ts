@@ -98,6 +98,7 @@ const validConnection = {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 describe("POST /api/db/schema", () => {
   beforeEach(() => {
+    delete mockProvider.getTableSchema;
     clearRateLimitState();
     mockGetOrCreateProvider.mockClear();
     (mockProvider.getSchema as ReturnType<typeof mock>).mockClear();
@@ -105,6 +106,57 @@ describe("POST /api/db/schema", () => {
     mockGetSession.mockImplementation(
       async (): Promise<{ role: string; username: string } | null> => ({ role: "admin", username: "admin" }),
     );
+  });
+
+  test("lazy schema returns only the decoded table using the provider fast path", async () => {
+    const name = 'Odd & quoted" table';
+    const table = { ...mockSchema[0], name };
+    mockProvider.getTableSchema = mock(async () => table);
+    const res = await POST(
+      createMockRequest(`/api/db/schema?table=${encodeURIComponent(name)}`, {
+        method: "POST",
+        body: validConnection,
+      }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([table]);
+    expect(mockProvider.getTableSchema).toHaveBeenCalledWith(name);
+    expect(mockProvider.getSchema).not.toHaveBeenCalled();
+  });
+
+  test("lazy schema falls back to full schema for providers without a table reader", async () => {
+    const res = await POST(
+      createMockRequest("/api/db/schema?table=users", { method: "POST", body: validConnection }) as never,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual([mockSchema[0]]);
+    expect(mockProvider.getSchema).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([true, false])("lazy schema returns 404 for a missing table (fast path: %s)", async (fast) => {
+    if (fast) mockProvider.getTableSchema = mock(async () => null);
+    const res = await POST(
+      createMockRequest("/api/db/schema?table=gone", { method: "POST", body: validConnection }) as never,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  test("lazy schema rejects an empty table name", async () => {
+    const res = await POST(
+      createMockRequest("/api/db/schema?table=", { method: "POST", body: validConnection }) as never,
+    );
+    expect(res.status).toBe(400);
+    expect(mockProvider.getSchema).not.toHaveBeenCalled();
+  });
+
+  test("lazy schema requires authentication before reading table details", async () => {
+    mockGetSession.mockResolvedValueOnce(null);
+    mockProvider.getTableSchema = mock(async () => mockSchema[0]);
+    const res = await POST(
+      createMockRequest("/api/db/schema?table=users", { method: "POST", body: validConnection }) as never,
+    );
+    expect(res.status).toBe(401);
+    expect(mockGetOrCreateProvider).not.toHaveBeenCalled();
   });
 
   test("returns 401 when no session exists", async () => {

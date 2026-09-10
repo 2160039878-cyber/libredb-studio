@@ -35,6 +35,16 @@ export async function POST(req: NextRequest) {
     }
 
     const provider = await getOrCreateProvider(connection);
+    const tableName = new URL(req.url).searchParams.get("table");
+    if (tableName !== null) {
+      if (!tableName) return NextResponse.json({ error: "Table name is required" }, { status: 400 });
+      const table = provider.getTableSchema
+        ? await provider.getTableSchema(tableName)
+        : (await provider.getSchema()).find((entry) => entry.name === tableName);
+      return table
+        ? NextResponse.json([table])
+        : NextResponse.json({ error: "Table no longer exists or is not visible" }, { status: 404 });
+    }
     const schema = await provider.getSchema();
 
     return NextResponse.json(schema);

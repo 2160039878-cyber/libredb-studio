@@ -22,6 +22,7 @@ interface SidebarProps {
   onDeleteConnection: (id: string) => void;
   onEditConnection?: (conn: DatabaseConnection) => void;
   onAddConnection: () => void;
+  onLoadTable?: (tableName: string) => Promise<TableSchema[] | null>;
   onTableClick?: (tableName: string) => void;
   onGenerateSelect?: (tableName: string) => void;
   onCreateTableClick?: () => void;
@@ -45,6 +46,7 @@ export function Sidebar({
   onDeleteConnection,
   onEditConnection,
   onAddConnection,
+  onLoadTable,
   onTableClick,
   onGenerateSelect,
   onCreateTableClick,
@@ -102,6 +104,8 @@ export function Sidebar({
 
           {activeConnection && (
             <SchemaExplorer
+              key={activeConnection.id}
+              onLoadTable={onLoadTable}
               schema={schema}
               isLoadingSchema={isLoadingSchema}
               schemaError={schemaError}
