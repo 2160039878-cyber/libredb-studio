@@ -204,6 +204,26 @@ describe("checkReadmes", () => {
 });
 
 describe("readme-check CLI", () => {
+  test.each(["README_pt.md", "README_ru.md"])("checks the engines in %s", (name) => {
+    const { exitCode, stderr } = runCLI({
+      "README.md": readme(),
+      [name]: readme(["PostgreSQL", "MySQL"]),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(name);
+    expect(stderr).toContain("missing Redis");
+  });
+
+  test.each(["README_pt.md", "README_ru.md"])("checks the install commands in %s", (name) => {
+    const { exitCode, stderr } = runCLI({
+      "README.md": readme(),
+      [name]: readme(ENGINES, [COMMANDS[0], "snap install libredb-studio"]),
+    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(name);
+    expect(stderr).toContain("does not appear verbatim");
+  });
+
   test("passes on a consistent set and names the invariant it checked", () => {
     const { exitCode, stdout } = runCLI({
       "README.md": readme(),
