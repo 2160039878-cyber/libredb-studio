@@ -204,7 +204,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 - **Inline Editing**: Double-click to update values directly in the grid, on engines whose SQL has a single-table row update (the control is hidden elsewhere).
 - **Column Filtering**: Per-column text filters on query results for instant data exploration.
 - **Interactive Pivot Table**: Client-side pivoting with 5 aggregation functions (COUNT, SUM, AVG, MIN, MAX) and SQL generation.
-- **Expert Exporter**: Instant CSV and JSON exports for reporting.
+- **Expert Exporter**: Instant CSV and JSON exports for reporting. CSV import and result export offer comma (default), semicolon and tab separators.
 
 ### Advanced Data Visualization
 - **8 Chart Types**: Bar, Line, Pie, Area, Scatter, Histogram, Stacked Bar, and Stacked Area charts powered by Recharts.

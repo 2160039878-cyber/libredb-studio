@@ -912,6 +912,27 @@ describe("Studio", () => {
   });
 
   // --- exportResults ---
+  test.each([";", "\t"])("CSV export forwards the chosen delimiter (%s)", async (delimiter) => {
+    tabMgrOverride = {
+      currentTab: {
+        id: "tab-1",
+        name: "Users",
+        query: "SELECT 1",
+        result: testResult,
+        isExecuting: false,
+        type: "sql",
+      },
+    };
+    render(<Studio />);
+    const exportFn = capturedBottomPanelProps.onExportResults as (
+      format: string,
+      artifact: null,
+      delimiter: string,
+    ) => void;
+    act(() => exportFn("csv", null, delimiter));
+    const blob = (mockCreateObjectURL.mock.calls[0] as unknown[])[0] as Blob;
+    expect((await blob.text()).split("\n")[0].replace(/^\uFEFF/, "")).toBe(testResult.fields.join(delimiter));
+  });
   test("exportResults CSV creates text/csv blob", () => {
     tabMgrOverride = {
       currentTab: {

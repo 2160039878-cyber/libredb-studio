@@ -1,5 +1,7 @@
 "use client";
 
+import type { CsvDelimiter } from "@/lib/export/csv";
+
 import { appFetch } from "@/lib/config/base-path";
 import React, { useState, useEffect, useRef } from "react";
 import { Sidebar, ConnectionsList } from "@/components/sidebar";
@@ -379,7 +381,11 @@ export default function Studio() {
    * `currentTab.result` wrote rows nobody was looking at. That is why the menu used to
    * be hidden over a hydrated view instead of retargeted.
    */
-  const exportResults = (format: ResultExportFormat, hydrated: AgentArtifactHydration | null = null) => {
+  const exportResults = (
+    format: ResultExportFormat,
+    hydrated: AgentArtifactHydration | null = null,
+    csvDelimiter?: CsvDelimiter,
+  ) => {
     const source = hydrated?.result ?? tabMgr.currentTab.result;
     if (!source) return;
     // The columns the engine declared for THIS result. The writers read every row by
@@ -401,6 +407,7 @@ export default function Studio() {
       // The types the engine declared for THIS result, which is what the DDL form
       // writes when they are there — the only source for a computed column.
       columnTypes: source.columnTypes,
+      csvDelimiter,
     });
     downloadText(file.content, file.mimeType, resultExportFileName(file.extension, hydrated?.runId));
   };
