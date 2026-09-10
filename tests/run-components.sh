@@ -281,7 +281,10 @@ run_group "Group 15/16: Remaining components" \
   tests/components/monitoring/StorageTab.test.tsx \
   tests/components/monitoring/SessionsTab.test.tsx \
   tests/components/monitoring/TablesTab.test.tsx \
-  tests/components/monitoring/QueriesTab.test.tsx \
+  tests/components/monitoring/QueriesTab.test.tsx
+
+# Read the real threshold storage without the other group's partial storage mocks.
+run_group "Group 22: Saved monitoring thresholds" \
   tests/components/monitoring/PerformanceTab.test.tsx \
   tests/components/monitoring/OverviewTab.test.tsx
 

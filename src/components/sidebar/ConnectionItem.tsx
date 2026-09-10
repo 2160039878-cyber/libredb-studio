@@ -1,6 +1,6 @@
 import React from "react";
 import { DatabaseConnection, ENVIRONMENT_LABELS } from "@/lib/types";
-import { Lock, Trash2, Pencil, Star } from "lucide-react";
+import { Lock, Trash2, Pencil, Star, Copy } from "lucide-react";
 import { getDBIcon } from "@/lib/db-ui-config";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ interface ConnectionItemProps {
   onEdit?: (conn: DatabaseConnection) => void;
   isFavorite?: boolean;
   onToggleFavorite?: (id: string) => void;
+  onDuplicate?: (conn: DatabaseConnection) => void;
 }
 
 export const ConnectionItem = React.memo(function ConnectionItem({
@@ -24,6 +25,7 @@ export const ConnectionItem = React.memo(function ConnectionItem({
   onEdit,
   isFavorite = false,
   onToggleFavorite,
+  onDuplicate,
 }: ConnectionItemProps) {
   return (
     <motion.div
@@ -84,6 +86,19 @@ export const ConnectionItem = React.memo(function ConnectionItem({
             }}
           >
             <Pencil strokeWidth={1.5} className="w-3 h-3" />
+          </button>
+        )}
+        {!conn.managed && onDuplicate && (
+          <button
+            className="p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-brand-tint/20 hover:text-brand"
+            aria-label="Duplicate connection"
+            title="Duplicate connection"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDuplicate(conn);
+            }}
+          >
+            <Copy strokeWidth={1.5} className="w-3 h-3" />
           </button>
         )}
         {!conn.managed && (
