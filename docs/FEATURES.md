@@ -88,7 +88,7 @@
 
 ### 10. AI Reliability & Error Management
 *   **Intelligent Error Handling:** Comprehensive English error messages for API quotas, rate limits, and service availability issues.
-*   **In-Place Error Alerts:** An AI feature that fails says so where it was invoked — the Query Safety dialog and the schema-documentation panel each render the failure inline instead of leaving a spinner or an empty result. (The in-editor AI panel that used to hold these alerts was removed; the alerts were not.)
+*   **In-Place Error Alerts:** The Query Safety dialog and schema-documentation panel render AI failures inline. Query Safety omits the credentials error only when no provider is configured at all, retaining the plain warning and explicit Cancel/Execute controls. Setting `LLM_PROVIDER` without its credentials is an unfinished setup, so that error stays visible, as do invalid provider settings, missing models or service URLs, authentication errors and service failures.
 *   **Graceful Degradation:** Robust backend logic to handle API timeouts and authentication failures without crashing the UI.
 
 ### 11. DevOps & Enterprise Deployment

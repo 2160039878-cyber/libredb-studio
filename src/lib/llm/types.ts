@@ -18,6 +18,12 @@ export interface LLMConfig {
   apiKey?: string;
   model: string;
   apiUrl?: string;
+  /**
+   * True when the provider was named rather than defaulted. Naming one is a statement of intent to
+   * use AI, so missing credentials are then an unfinished setup to report, not an absence to pass
+   * over. Absent means implicit, which keeps a hand-built config on the quiet path.
+   */
+  providerExplicit?: boolean;
 }
 
 // ============================================================================
@@ -90,7 +96,11 @@ export class LLMError extends Error {
  * Configuration error - missing or invalid config
  */
 export class LLMConfigError extends LLMError {
-  constructor(message: string, provider?: LLMProviderType) {
+  constructor(
+    message: string,
+    provider?: LLMProviderType,
+    public readonly reason?: "missing_credentials",
+  ) {
     super(message, provider);
     this.name = "LLMConfigError";
     Object.setPrototypeOf(this, LLMConfigError.prototype);

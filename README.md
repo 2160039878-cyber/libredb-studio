@@ -195,7 +195,7 @@ Standalone application only: the embedded `@libredb/studio` package carries no a
 
 ### Model-backed helpers
 - **Universal LLM Support**: Defaults to Gemini and serves OpenAI, Ollama, and any OpenAI-compatible endpoint (LM Studio, LiteLLM, vLLM).
-- **Query Safety Analysis**: AI-powered pre-execution risk assessment for destructive queries (DELETE, DROP, TRUNCATE).
+- **Query Safety Analysis**: AI-powered pre-execution risk assessment for destructive queries (DELETE, DROP, TRUNCATE). With no provider configured, the confirmation remains available with a plain query warning. Setting `LLM_PROVIDER` without its credentials is an unfinished setup, so that error stays visible, as do other configuration and service errors.
 - **AI Query Explainer**: EXPLAIN plans translated into plain language with optimization suggestions.
 - **Schema Awareness**: the connected database's schema is sent as context, so an explanation names your own tables and columns.
 - **Data Profiler summary**: the profiler's per-column statistics written up in prose. That context carries each column's `min` and `max`, which are real values from your data; see [Agent Data Flow](docs/AGENT_DATA_FLOW.md).
