@@ -49,6 +49,7 @@ const FIELD_OWNERSHIP: Record<keyof DatabaseConnection, FieldOwnership> = {
   password: "edited",
   database: "edited",
   schema: "edited",
+  queryTimeout: "edited",
   connectionString: "edited",
   createdAt: "edited",
   // Preserve a custom color while the environment is unchanged; otherwise use its palette.
@@ -158,6 +159,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
   const [password, setPassword] = useState("");
   const [database, setDatabase] = useState("");
   const [schema, setSchema] = useState("");
+  const [queryTimeout, setQueryTimeout] = useState("");
   const [isTesting, setIsTesting] = useState(false);
   const [connectionString, setConnectionString] = useState("");
   const [mongoConnectionMode, setMongoConnectionMode] = useState<"host" | "connectionString">("host");
@@ -224,6 +226,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       setPassword(editConnection.password || "");
       setDatabase(editConnection.database || "");
       setSchema(editConnection.schema || "");
+      setQueryTimeout(editConnection.queryTimeout?.toString() ?? "");
       setConnectionString(editConnection.connectionString || "");
       setEnvironment(editConnection.environment || "local");
       if (editConnection.connectionString) {
@@ -300,6 +303,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
         setPassword("");
         setDatabase("");
         setSchema("");
+        setQueryTimeout("");
         setConnectionString("");
         setMongoConnectionMode("host");
         setType("postgres");
@@ -374,6 +378,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       ...(addressedFields.has("password") ? { password } : {}),
       ...(addressedFields.has("database") ? { database } : {}),
       ...(addressedFields.has("schema") && schema ? { schema } : {}),
+      ...(queryTimeout.trim() ? { queryTimeout: Number(queryTimeout) } : {}),
       createdAt: editConnection?.createdAt || new Date(),
       environment,
       color:
@@ -418,6 +423,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     password,
     database,
     schema,
+    queryTimeout,
     environment,
     mongoConnectionMode,
     connectionString,
@@ -451,7 +457,20 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     [onTestConnection],
   );
 
+  const validateQueryTimeout = useCallback(() => {
+    const value = Number(queryTimeout);
+    if (queryTimeout.trim() && (!Number.isInteger(value) || value < 1 || value > 2147483647)) {
+      setTestResult({
+        tone: "error",
+        message: "Query timeout must be a whole number between 1 and 2147483647 milliseconds.",
+      });
+      return false;
+    }
+    return true;
+  }, [queryTimeout]);
+
   const handleTestConnection = useCallback(async () => {
+    if (!validateQueryTimeout()) return;
     setIsTesting(true);
     setTestResult(null);
 
@@ -477,9 +496,10 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     } finally {
       setIsTesting(false);
     }
-  }, [buildConnection, probeConnection]);
+  }, [buildConnection, probeConnection, validateQueryTimeout]);
 
   const handleConnect = useCallback(async () => {
+    if (!validateQueryTimeout()) return;
     setIsTesting(true);
     setTestResult(null);
 
@@ -525,6 +545,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
       }
 
       onConnect(conn);
+      setQueryTimeout("");
       // Reset form
       setName("");
       setUser("");
@@ -538,7 +559,7 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     } finally {
       setIsTesting(false);
     }
-  }, [buildConnection, degradedSaveAcknowledged, isEditMode, onConnect, probeConnection]);
+  }, [buildConnection, degradedSaveAcknowledged, isEditMode, onConnect, probeConnection, validateQueryTimeout]);
 
   const handlePasteConnectionString = useCallback(() => {
     const trimmed = pasteInput.trim();
@@ -663,6 +684,8 @@ export function useConnectionForm({ isOpen, onConnect, editConnection, onTestCon
     schema,
     setDatabase,
     setSchema,
+    queryTimeout,
+    setQueryTimeout,
     connectionString,
     setConnectionString,
     mongoConnectionMode,
