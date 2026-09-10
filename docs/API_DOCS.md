@@ -1316,12 +1316,12 @@ type ConnectionEnvironment = 'production' | 'staging' | 'development' | 'local' 
 ```typescript
 interface TableSchema {
   name: string;            // Table name
+  detailsLoaded?: boolean;  // False for inventory entries until table detail is loaded
   columns: ColumnSchema[]; // Column definitions
   indexes: IndexSchema[];  // Index definitions
   foreignKeys?: ForeignKeySchema[];
   rowCount?: number;       // Approximate row count
   size?: string;           // Table size (e.g., "2.4 MB")
-  detailsLoaded?: boolean;  // False for inventory entries until table detail is loaded
 }
 
 interface ColumnSchema {
