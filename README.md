@@ -130,6 +130,7 @@ And nothing is held back. Single sign-on, ER diagrams, the AI features and the N
 - **Smart Autocomplete**: Schema-aware suggestions for tables, columns, and SQL keywords.
 - **Command Palette**: Quick access to tables, connections, saved queries, and actions with `Cmd/Ctrl+K`.
 - **Multi-Tab Workspace**: Handle parallel tasks with independent execution states.
+- **Duplicate Connections**: Open an independent `(copy)` of an editable saved connection in the connection editor, adjust its settings and save. Cancelling leaves the saved connections unchanged; administrator-managed connections cannot be duplicated.
 - **Visual EXPLAIN**: Graphical execution plans to identify performance bottlenecks.
 - **Interactive ER Diagrams**: Visual schema graph with real foreign key edges, cardinality labels, MiniMap navigation, table search/filter, compact mode, and PNG/SVG export. Automatic hierarchical layout powered by ELK.js.
 - **Schema Diff & Migration**: Compare schema snapshots or cross-connection schemas side-by-side. Color-coded diff view (added/removed/modified) with automatic migration SQL generation for PostgreSQL, MySQL, SQLite, Oracle, and SQL Server, plus ClickHouse column modifications.
