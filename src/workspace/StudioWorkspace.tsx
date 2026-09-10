@@ -1,6 +1,7 @@
 "use client";
 
 import { SchemaLoadGate } from "@/components/schema-explorer/SchemaLoadGate";
+import type { CsvDelimiter } from "@/lib/export/csv";
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Sidebar } from "@/components/sidebar";
@@ -261,7 +262,7 @@ export function StudioWorkspace({
 
   // === Export results (shared writers; this shell applies no masking) ===
   const exportResults = useCallback(
-    (format: ResultExportFormat) => {
+    (format: ResultExportFormat, _hydrated?: unknown, csvDelimiter?: CsvDelimiter) => {
       if (!tabMgr.currentTab.result) return;
       const file = buildResultExport(format, {
         rows: tabMgr.currentTab.result.rows,
@@ -274,6 +275,7 @@ export function StudioWorkspace({
         // The host's own declared column types (`use-query-adapter` carries them),
         // which the DDL form prefers over a type guessed from a value.
         columnTypes: tabMgr.currentTab.result.columnTypes,
+        csvDelimiter,
       });
       downloadText(file.content, file.mimeType, `query_result_export.${file.extension}`);
     },

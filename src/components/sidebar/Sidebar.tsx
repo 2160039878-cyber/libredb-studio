@@ -21,6 +21,7 @@ interface SidebarProps {
   onSelectConnection: (connection: DatabaseConnection) => void;
   onDeleteConnection: (id: string) => void;
   onEditConnection?: (conn: DatabaseConnection) => void;
+  onDuplicateConnection?: (conn: DatabaseConnection) => void;
   onAddConnection: () => void;
   onLoadTable?: (tableName: string) => Promise<TableSchema[] | null>;
   onTableClick?: (tableName: string) => void;
@@ -45,6 +46,7 @@ export function Sidebar({
   onSelectConnection,
   onDeleteConnection,
   onEditConnection,
+  onDuplicateConnection,
   onAddConnection,
   onLoadTable,
   onTableClick,
@@ -99,6 +101,7 @@ export function Sidebar({
             onSelectConnection={onSelectConnection}
             onDeleteConnection={onDeleteConnection}
             onEditConnection={onEditConnection}
+            onDuplicateConnection={onDuplicateConnection}
             onAddConnection={onAddConnection}
           />
 
