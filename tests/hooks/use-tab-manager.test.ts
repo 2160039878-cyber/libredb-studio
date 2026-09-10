@@ -268,6 +268,8 @@ describe("useTabManager", () => {
     const newTab = result.current.tabs[1];
     expect(newTab.name).toBe("users");
     expect(newTab.query).toBe("SELECT * FROM users LIMIT 50;");
+    expect(newTab.previewQuery).toBe(newTab.query);
+    expect(result.current.tabs[0].previewQuery).toBeUndefined();
     expect(newTab.type).toBe("sql");
 
     // Active tab should be the new one

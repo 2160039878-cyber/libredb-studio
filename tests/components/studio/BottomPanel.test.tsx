@@ -216,6 +216,51 @@ function createDefaultProps(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 describe("BottomPanel", () => {
+  test("refresh rows re-executes only the unchanged table preview and respects pending work", () => {
+    const onRefreshResults = mock(() => {});
+    const previewTab = {
+      ...createDefaultProps().currentTab,
+      query: "SELECT * FROM users LIMIT 50;",
+      previewQuery: "SELECT * FROM users LIMIT 50;",
+      result: { rows: [{ id: 1 }], fields: ["id"], rowCount: 1, executionTime: 1 },
+    };
+    const props = createDefaultProps({ currentTab: previewTab, activeConnection: { id: "c1" }, onRefreshResults });
+    const { getByRole, queryByRole, rerender } = render(
+      <BottomPanel {...(props as React.ComponentProps<typeof BottomPanel>)} />,
+    );
+    fireEvent.click(getByRole("button", { name: "Refresh rows" }));
+    expect(onRefreshResults).toHaveBeenCalledWith(previewTab.previewQuery, previewTab.id);
+    for (const blocked of [
+      { currentTab: { ...previewTab, isExecuting: true } },
+      { isLoadingMore: true },
+      { pendingChanges: [{}] },
+    ]) {
+      rerender(<BottomPanel {...({ ...props, ...blocked } as React.ComponentProps<typeof BottomPanel>)} />);
+      const refresh = getByRole("button", { name: "Refresh rows" });
+      expect(refresh.hasAttribute("disabled")).toBe(true);
+      fireEvent.click(refresh);
+    }
+    expect(onRefreshResults).toHaveBeenCalledTimes(1);
+    for (const unavailable of [
+      { currentTab: { ...previewTab, query: "DELETE FROM users" } },
+      { currentTab: { ...previewTab, previewQuery: undefined } },
+      { activeConnection: null },
+      { onRefreshResults: undefined },
+      { mode: "history" },
+      {
+        agentArtifact: {
+          surface: "results",
+          result: previewTab.result,
+          runId: "r1",
+          operationId: "query",
+          correlationId: "c1",
+        },
+      },
+    ]) {
+      rerender(<BottomPanel {...({ ...props, ...unavailable } as React.ComponentProps<typeof BottomPanel>)} />);
+      expect(queryByRole("button", { name: "Refresh rows" })).toBeNull();
+    }
+  });
   /*
     The panel's heavy views are code-split (`React.lazy` in BottomPanel.tsx), so the
     FIRST render of each one suspends while its dynamic import resolves. `React.lazy`

@@ -397,6 +397,10 @@ export default function Studio() {
     tabMgr.handleTableClick(tableName, queryExec.executeQuery);
   };
 
+  const onRefreshSchema = () => {
+    if (conn.activeConnection) conn.fetchSchema(conn.activeConnection);
+  };
+
   const requestDeleteConnection = (id: string) => {
     setPendingDeleteConnectionId(id);
   };
@@ -494,6 +498,7 @@ export default function Studio() {
                 }}
                 onAddConnection={() => setIsConnectionModalOpen(true)}
                 onTableClick={onTableClick}
+                onRefreshSchema={onRefreshSchema}
                 onGenerateSelect={tabMgr.handleGenerateSelect}
                 onCreateTableClick={() => setIsCreateTableModalOpen(true)}
                 onShowDiagram={() => setShowDiagram(true)}
@@ -623,6 +628,7 @@ export default function Studio() {
                         onTableClick(tableName);
                         setActiveMobileTab("editor");
                       }}
+                      onRefreshSchema={onRefreshSchema}
                       onGenerateSelect={(tableName) => {
                         tabMgr.handleGenerateSelect(tableName);
                         setActiveMobileTab("editor");
@@ -687,6 +693,7 @@ export default function Studio() {
                     <ResizableHandle className="h-1 bg-fill hover:bg-brand-tint/20" />
                     <ResizablePanel id="studio-editor-bottom" defaultSize="60" minSize="20">
                       <BottomPanel
+                        onRefreshResults={queryExec.executeQuery}
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
                         currentTab={tabMgr.currentTab}

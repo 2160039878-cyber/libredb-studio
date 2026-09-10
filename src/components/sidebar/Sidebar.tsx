@@ -23,6 +23,7 @@ interface SidebarProps {
   onEditConnection?: (conn: DatabaseConnection) => void;
   onAddConnection: () => void;
   onTableClick?: (tableName: string) => void;
+  onRefreshSchema?: () => void;
   onGenerateSelect?: (tableName: string) => void;
   onCreateTableClick?: () => void;
   onShowDiagram?: () => void;
@@ -46,6 +47,7 @@ export function Sidebar({
   onEditConnection,
   onAddConnection,
   onTableClick,
+  onRefreshSchema,
   onGenerateSelect,
   onCreateTableClick,
   onShowDiagram,
@@ -106,6 +108,7 @@ export function Sidebar({
               isLoadingSchema={isLoadingSchema}
               schemaError={schemaError}
               onTableClick={onTableClick}
+              onRefreshSchema={onRefreshSchema}
               onGenerateSelect={onGenerateSelect}
               onCreateTableClick={onCreateTableClick}
               isAdmin={isAdmin}

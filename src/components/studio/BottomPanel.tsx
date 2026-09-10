@@ -26,6 +26,7 @@ import {
   GitCompare,
   LayoutDashboard,
   LayoutGrid,
+  RefreshCw,
   Terminal,
   X,
   Zap,
@@ -159,6 +160,7 @@ interface BottomPanelProps {
   // Actions
   onLoadQuery: (query: string) => void;
   onLoadMore: (() => void) | undefined;
+  onRefreshResults?: (query: string, tabId: string) => void;
   isLoadingMore: boolean | undefined;
   // The writer's own type, so a format added there cannot silently fail to reach this
   // menu — the drift between two spellings of one list is what this PR is about.
@@ -197,6 +199,7 @@ export function BottomPanel({
   onDiscardChanges,
   onLoadQuery,
   onLoadMore,
+  onRefreshResults,
   isLoadingMore,
   onExportResults,
   agentArtifact = null,
@@ -349,6 +352,24 @@ export function BottomPanel({
             <span className="hidden @4xl/panel:inline text-xs font-mono text-fg-muted mr-2">
               {displayedResult.rowCount} rows • {displayedResult.executionTime}ms
             </span>
+            {!hydratedHere &&
+              activeConnection &&
+              onRefreshResults &&
+              currentTab.previewQuery &&
+              currentTab.query === currentTab.previewQuery && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs text-fg-muted gap-1.5"
+                  title="Refresh rows"
+                  aria-label="Refresh rows"
+                  disabled={currentTab.isExecuting || isLoadingMore || pendingChanges.length > 0}
+                  onClick={() => onRefreshResults(currentTab.previewQuery!, currentTab.id)}
+                >
+                  <RefreshCw strokeWidth={1.5} className="w-3 h-3" />
+                  <span className="hidden @2xl/panel:inline">Refresh rows</span>
+                </Button>
+              )}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button

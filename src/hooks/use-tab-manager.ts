@@ -199,6 +199,7 @@ export function useTabManager({ activeConnection, metadata, schema, persistWorks
         id: newId,
         name: tableName,
         query: newQuery,
+        previewQuery: newQuery,
         result: null,
         isExecuting: false,
         type: resolveTabType(capabilities),

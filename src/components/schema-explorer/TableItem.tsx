@@ -238,6 +238,8 @@ export const TableItem = React.memo(function TableItem({
               aria-expanded={isExpanded}
               className="flex items-center gap-1.5 flex-1 min-w-0 py-1.5 cursor-pointer text-left"
               onClick={onToggle}
+              onDoubleClick={() => onTableClick?.(table.name)}
+              title={onTableClick ? "Double-click to preview data" : undefined}
             >
               <motion.div animate={{ rotate: isExpanded ? 90 : 0 }} transition={{ duration: 0.2 }} className="shrink-0">
                 <ChevronRight strokeWidth={1.5} className="w-3.5 h-3.5 text-muted-foreground" />

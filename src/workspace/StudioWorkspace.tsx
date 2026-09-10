@@ -281,6 +281,10 @@ export function StudioWorkspace({
     [tabMgr, queryExec.executeQuery],
   );
 
+  const onRefreshSchema = () => {
+    if (conn.activeConnection) conn.fetchSchema(conn.activeConnection);
+  };
+
   // === No-op callbacks for disabled features ===
   /** What the panel group may hold: below the breakpoint, only the body panel. */
   const isMobile = useIsMobile();
@@ -319,6 +323,7 @@ export function StudioWorkspace({
                 onEditConnection={noop}
                 onAddConnection={noop}
                 onTableClick={onTableClick}
+                onRefreshSchema={onRefreshSchema}
                 onGenerateSelect={tabMgr.handleGenerateSelect}
                 onCreateTableClick={undefined}
                 onShowDiagram={features.schemaDiagram ? () => setShowDiagram(true) : undefined}
@@ -423,6 +428,7 @@ export function StudioWorkspace({
                     <ResizableHandle className="h-1 bg-fill hover:bg-brand-tint/20" />
                     <ResizablePanel id="workspace-editor-bottom" defaultSize="60" minSize="20">
                       <BottomPanel
+                        onRefreshResults={queryExec.executeQuery}
                         mode={queryExec.bottomPanelMode}
                         onSetMode={queryExec.setBottomPanelMode}
                         currentTab={tabMgr.currentTab}

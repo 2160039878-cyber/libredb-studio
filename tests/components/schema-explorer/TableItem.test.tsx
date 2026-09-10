@@ -253,6 +253,34 @@ describe("TableItem", () => {
 
   // ── Dropdown action callbacks ─────────────────────────────────────────────
 
+  test("double-click previews a table through the existing select action", () => {
+    const onTableClick = mock(() => {});
+    const onToggle = mock(() => {});
+    const { getByText } = render(
+      <TableItem
+        table={largeTable}
+        isExpanded={false}
+        onToggle={onToggle}
+        isAdmin={false}
+        onTableClick={onTableClick}
+      />,
+    );
+    const name = getByText("users");
+    fireEvent.click(name, { detail: 1 });
+    fireEvent.click(name, { detail: 2 });
+    fireEvent.doubleClick(name);
+    expect(onToggle).toHaveBeenCalledTimes(2);
+    expect(onTableClick).toHaveBeenCalledTimes(1);
+    expect(onTableClick).toHaveBeenCalledWith("users");
+  });
+
+  test("double-click remains safe when no preview callback is supplied", () => {
+    const { getByText } = render(
+      <TableItem table={largeTable} isExpanded={false} onToggle={mock(() => {})} isAdmin={false} />,
+    );
+    expect(() => fireEvent.doubleClick(getByText("users"))).not.toThrow();
+  });
+
   test('onTableClick fires with table name on "Select Top 50" click', () => {
     const onTableClick = mock((name: string) => {
       void name;

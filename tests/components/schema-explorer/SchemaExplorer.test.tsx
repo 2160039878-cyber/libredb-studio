@@ -30,7 +30,7 @@ mock.module("@/components/schema-explorer/TableItem", () => ({
 }));
 
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { render, within, cleanup } from "@testing-library/react";
+import { render, within, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 
@@ -94,6 +94,26 @@ function createDefaultProps(overrides: Partial<Parameters<typeof SchemaExplorer>
 }
 
 describe("SchemaExplorer", () => {
+  test("refresh schema is separate and remains available for empty or failed reads", () => {
+    const onRefreshSchema = mock(() => {});
+    const props = createDefaultProps({ onRefreshSchema });
+    const { getByRole, queryByRole, rerender } = render(<SchemaExplorer {...props} />);
+    fireEvent.click(getByRole("button", { name: "Refresh schema" }));
+    expect(onRefreshSchema).toHaveBeenCalledTimes(1);
+    expect(props.onTableClick).not.toHaveBeenCalled();
+    for (const schemaError of [null, "Schema read failed"]) {
+      rerender(<SchemaExplorer {...props} schema={[]} schemaError={schemaError} />);
+      fireEvent.click(getByRole("button", { name: "Refresh schema" }));
+    }
+    expect(onRefreshSchema).toHaveBeenCalledTimes(3);
+    rerender(<SchemaExplorer {...props} isLoadingSchema />);
+    const busy = getByRole("button", { name: "Refresh schema" });
+    expect(busy.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(busy);
+    expect(onRefreshSchema).toHaveBeenCalledTimes(3);
+    rerender(<SchemaExplorer {...props} onRefreshSchema={undefined} />);
+    expect(queryByRole("button", { name: "Refresh schema" })).toBeNull();
+  });
   afterEach(() => {
     cleanup();
   });

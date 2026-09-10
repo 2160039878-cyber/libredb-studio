@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { TableSchema } from "@/lib/types";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
-import { Search, Hash, LoaderCircle, CircleAlert, Database, Plus, Settings } from "lucide-react";
+import { Search, Hash, LoaderCircle, CircleAlert, Database, Plus, Settings, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AnimatePresence } from "framer-motion";
@@ -19,6 +19,7 @@ interface SchemaExplorerProps {
    */
   schemaError?: string | null;
   onTableClick?: (tableName: string) => void;
+  onRefreshSchema?: () => void;
   onGenerateSelect?: (tableName: string) => void;
   onCreateTableClick?: () => void;
   isAdmin?: boolean;
@@ -35,6 +36,7 @@ export function SchemaExplorer({
   isLoadingSchema,
   schemaError = null,
   onTableClick,
+  onRefreshSchema,
   onGenerateSelect,
   onCreateTableClick,
   isAdmin = false,
@@ -48,6 +50,19 @@ export function SchemaExplorer({
   const capabilities = metadata?.capabilities;
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
+  const refreshButton = onRefreshSchema && (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-6 w-6 text-muted-foreground"
+      onClick={onRefreshSchema}
+      disabled={isLoadingSchema}
+      title="Refresh schema"
+      aria-label="Refresh schema"
+    >
+      <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5" />
+    </Button>
+  );
 
   const toggleTable = useCallback((tableName: string) => {
     setExpandedTables((prev) => {
@@ -80,6 +95,7 @@ export function SchemaExplorer({
           <Database strokeWidth={1.5} className="w-3.5 h-3.5 absolute inset-0 m-auto text-brand animate-pulse" />
         </div>
         <span className="text-xs font-medium animate-pulse">Scanning Schema...</span>
+        {refreshButton}
       </div>
     );
   }
@@ -99,6 +115,7 @@ export function SchemaExplorer({
         </div>
         <h3 className="text-foreground text-xs font-medium mb-1">Schema could not be read</h3>
         <p className="text-xs text-muted-foreground leading-relaxed break-words">{schemaError}</p>
+        {refreshButton}
       </div>
     );
   }
@@ -113,6 +130,7 @@ export function SchemaExplorer({
         <p className="text-xs text-muted-foreground leading-relaxed">
           We couldn&apos;t find any tables or views in this connection.
         </p>
+        {refreshButton}
         {capabilities?.supportsCreateTable !== false && (
           <button
             className="mt-3 flex items-center gap-1.5 rounded-md bg-brand-solid hover:bg-brand-solid-hover text-white px-3 py-1.5 text-xs font-medium transition-colors"
@@ -136,6 +154,7 @@ export function SchemaExplorer({
             <span className="text-xs font-medium text-muted-foreground">Explorer</span>
           </div>
           <div className="flex items-center gap-1.5">
+            {refreshButton}
             {isAdmin && (
               <button
                 className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-warning transition-colors"

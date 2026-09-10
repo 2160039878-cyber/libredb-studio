@@ -690,6 +690,20 @@ describe("StudioWorkspace", () => {
     expect(mockHandleTableClick).toHaveBeenCalledWith("users", mockExecuteQuery);
   });
 
+  test("preview refresh callbacks use the embedded host connection and explicit query", () => {
+    renderWorkspace();
+    mockFetchSchema.mockClear();
+    act(() => (capturedSidebarProps.onRefreshSchema as () => void)());
+    expect(mockFetchSchema).toHaveBeenCalledWith(dbConn);
+    act(() =>
+      (capturedBottomPanelProps.onRefreshResults as (query: string, id: string) => void)(
+        "SELECT * FROM users LIMIT 50;",
+        "tab-1",
+      ),
+    );
+    expect(mockExecuteQuery).toHaveBeenCalledWith("SELECT * FROM users LIMIT 50;", "tab-1");
+  });
+
   test("sidebar noop callbacks and references are wired", () => {
     renderWorkspace();
     expect(capturedSidebarProps.onSelectConnection).toBe(mockSetActiveConnection);

@@ -23,8 +23,10 @@ mock.module("@/components/sidebar/ConnectionsList", () => ({
   },
 }));
 
+let capturedSchemaExplorerProps: Record<string, unknown> = {};
 mock.module("@/components/schema-explorer", () => ({
   SchemaExplorer: (props: Record<string, unknown>) => {
+    capturedSchemaExplorerProps = props;
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const React = require("react");
     const schema = props.schema as Array<unknown> | undefined;
@@ -115,6 +117,11 @@ function createDefaultProps(overrides: Record<string, unknown> = {}) {
 }
 
 describe("Sidebar", () => {
+  test("passes the schema refresh action to the explorer", () => {
+    const onRefreshSchema = mock(() => {});
+    render(<Sidebar {...createDefaultProps({ onRefreshSchema })} />);
+    expect(capturedSchemaExplorerProps.onRefreshSchema).toBe(onRefreshSchema);
+  });
   // The version tests mutate a process-wide value. The file happens to run alone
   // in its group today, but that isolation is incidental - restore it explicitly
   // so a later regrouping cannot turn this into an order-dependent flake.

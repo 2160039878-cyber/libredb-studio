@@ -185,6 +185,14 @@ Multi-statement queries execute sequentially via `POST /api/db/multi-query`.
 - **React hooks** for UI state: tabs, active connection, execution status
 - **Custom hooks** extracted from Studio.tsx: `useAuth`, `useConnectionManager`, `useTabManager`, `useTransactionControl`, `useQueryExecution`, `useInlineEditing`
 
+Double-clicking an Explorer table uses `useTabManager.handleTableClick`, the same action as
+Select Top 50: it opens a new query tab and executes the provider's preview query. A session-only
+`QueryTab.previewQuery` records that generated query. BottomPanel's **Refresh rows** reruns it
+on the same tab through the standalone or embedded execution hook; it is hidden after query
+edits and for stored agent results, and disabled during execution, pagination or pending cell
+edits. **Refresh schema** separately invokes the current connection's schema fetch, including
+from empty/error states, without executing a query or replacing editor tabs.
+
 ### 4.6. Workspace Abstraction (npm package embedding)
 
 Studio ships both as a standalone app and as the `@libredb/studio` npm package consumed by libredb-platform (built with `tsup` via `build:lib`).

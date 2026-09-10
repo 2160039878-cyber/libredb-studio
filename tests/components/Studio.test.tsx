@@ -802,6 +802,27 @@ describe("Studio", () => {
   });
 
   // --- onTableClick ---
+  test("preview refresh callbacks use the current connection and explicit query", () => {
+    connMgrOverride = { activeConnection: pgConn };
+    render(<Studio />);
+    mockFetchSchema.mockClear();
+    act(() => (capturedSidebarProps.onRefreshSchema as () => void)());
+    expect(mockFetchSchema).toHaveBeenCalledWith(pgConn);
+    act(() => (capturedMobileNavProps.onTabChange as (tab: string) => void)("schema"));
+    mockFetchSchema.mockClear();
+    act(() => (capturedSchemaExplorerProps.onRefreshSchema as () => void)());
+    expect(mockFetchSchema).toHaveBeenCalledTimes(1);
+    expect(mockFetchSchema).toHaveBeenCalledWith(pgConn);
+    act(() => (capturedMobileNavProps.onTabChange as (tab: string) => void)("editor"));
+    act(() =>
+      (capturedBottomPanelProps.onRefreshResults as (query: string, id: string) => void)(
+        "SELECT * FROM users LIMIT 50;",
+        "tab-1",
+      ),
+    );
+    expect(mockExecuteQuery).toHaveBeenCalledWith("SELECT * FROM users LIMIT 50;", "tab-1");
+  });
+
   test("onTableClick delegates to handleTableClick with executeQuery", () => {
     render(<Studio />);
     const fn = capturedSidebarProps.onTableClick as (name: string) => void;

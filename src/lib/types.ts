@@ -333,6 +333,8 @@ export interface QueryTab {
   id: string;
   name: string;
   query: string;
+  /** Original generated preview query; refreshing rows must not execute edited SQL. */
+  previewQuery?: string;
   result: QueryResult | null;
   isExecuting: boolean;
   type: "sql" | "mongodb" | "redis" | "libredb";
