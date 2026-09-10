@@ -4,7 +4,6 @@ import React, { useState, useMemo, useCallback } from "react";
 import { TableSchema } from "@/lib/types";
 import type { ProviderMetadata } from "@/hooks/use-provider-metadata";
 import { Search, Hash, LoaderCircle, CircleAlert, Database, Plus, Settings, RefreshCw } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { AnimatePresence } from "framer-motion";
 import { TableItem } from "./TableItem";
@@ -51,17 +50,16 @@ export function SchemaExplorer({
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedTables, setExpandedTables] = useState<Set<string>>(new Set());
   const refreshButton = onRefreshSchema && (
-    <Button
-      variant="ghost"
-      size="icon"
-      className="h-6 w-6 text-muted-foreground"
+    <button
+      type="button"
+      className="p-1 rounded hover:bg-accent text-muted-foreground hover:text-brand transition-colors disabled:pointer-events-none disabled:opacity-50"
       onClick={onRefreshSchema}
       disabled={isLoadingSchema}
       title="Refresh schema"
       aria-label="Refresh schema"
     >
       <RefreshCw strokeWidth={1.5} className="w-3.5 h-3.5" />
-    </Button>
+    </button>
   );
 
   const toggleTable = useCallback((tableName: string) => {
